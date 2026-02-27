@@ -37,6 +37,16 @@ interface AdAccount {
   currency: string
 }
 
+interface ShopifyData {
+  shopDomain: string
+  summary: {
+    totalOrders: number
+    totalRevenue: number
+    avgOrderValue: number
+    period: string
+  }
+}
+
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -80,6 +90,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [loading, setLoading] = useState(true)
   const [needsConnection, setNeedsConnection] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Shopify state
+  const [shopifyData, setShopifyData] = useState<ShopifyData | null>(null)
+  const [needsShopifyConnection, setNeedsShopifyConnection] = useState(false)
+  const [shopifyLoading, setShopifyLoading] = useState(true)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -125,6 +140,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           campaigns: filteredCampaigns,
           currency,
           datePreset,
+          shopifyData: shopifyData?.summary ?? null,
         }),
         signal: controller.signal,
       })
@@ -162,12 +178,15 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   useEffect(() => {
     const metaStatus = searchParams.get('meta')
+    const shopifyStatus = searchParams.get('shopify')
     const errorParam = searchParams.get('error')
     if (metaStatus === 'connected') loadAccounts()
+    if (shopifyStatus === 'connected') loadShopifyOrders()
     if (errorParam) setError(`Error de conexión: ${errorParam}`)
   }, [searchParams])
 
   useEffect(() => { loadAccounts() }, [])
+  useEffect(() => { loadShopifyOrders() }, [datePreset])
 
   useEffect(() => {
     if (selectedAccount) loadCampaigns()
@@ -200,7 +219,25 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setLoading(false)
   }
 
+  async function loadShopifyOrders() {
+    setShopifyLoading(true)
+    try {
+      const res = await fetch(`/api/shopify/orders?date_preset=${datePreset}`)
+      const data = await res.json()
+      if (data.needsConnection) {
+        setNeedsShopifyConnection(true)
+      } else if (data.success) {
+        setShopifyData(data)
+        setNeedsShopifyConnection(false)
+      }
+    } catch {
+      setNeedsShopifyConnection(true)
+    }
+    setShopifyLoading(false)
+  }
+
   const handleConnectMeta = () => { window.location.href = '/api/auth/meta' }
+  const handleConnectShopify = () => { window.location.href = '/api/auth/shopify' }
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login'); router.refresh() }
 
   const totals = filteredCampaigns.reduce((acc, c) => ({
@@ -308,6 +345,67 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Shopify Connection Alert */}
+        {needsShopifyConnection && (
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5 mb-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-green-700" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M15.337 2.456c-.083-.459-.502-.787-.967-.787-.005 0-.009 0-.014 0-.459.013-.851.353-.913.809l-.355 2.637c-.517.18-1.008.415-1.466.697l-2.367-1.054c-.42-.186-.912-.066-1.197.292l-.01.012c-.285.358-.285.864.002 1.221l1.633 2.02c-.253.508-.45 1.049-.577 1.617l-2.604.598c-.458.105-.782.513-.782.981 0 .468.324.876.782.981l2.604.598c.127.568.324 1.11.577 1.617l-1.633 2.02c-.287.357-.287.863-.002 1.221l.01.012c.285.358.777.478 1.197.292l2.367-1.054c.458.282.949.517 1.466.697l.355 2.637c.062.456.454.796.913.809.005 0 .009 0 .014 0 .465 0 .884-.328.967-.787l.39-2.65c.509-.186.992-.425 1.441-.711l2.415 1.074c.42.186.912.066 1.197-.292l.01-.012c.285-.358.285-.864-.002-1.221l-1.662-2.057c.248-.506.441-1.043.567-1.607l2.656-.61c.458-.105.782-.513.782-.981 0-.468-.324-.876-.782-.981l-2.656-.61c-.126-.564-.319-1.101-.567-1.607l1.662-2.057c.287-.357.287-.863.002-1.221l-.01-.012c-.285-.358-.777-.478-1.197-.292l-2.415 1.074c-.449-.286-.932-.525-1.441-.711l-.39-2.65zm-1.337 9.544a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-green-900">Conecta tu tienda Shopify</h3>
+                <p className="text-sm text-green-700 mt-1">Ver órdenes reales de <strong>corvega.myshopify.com</strong> y comparar con el revenue reportado por Meta.</p>
+                <button onClick={handleConnectShopify}
+                  className="mt-3 px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-semibold rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all shadow-sm">
+                  Conectar Shopify
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Shopify Real Revenue vs Meta */}
+        {shopifyData && !shopifyLoading && (
+          <div className="bg-white rounded-xl border border-green-200 p-5 mb-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-green-700" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M15.337 2.456c-.083-.459-.502-.787-.967-.787-.005 0-.009 0-.014 0-.459.013-.851.353-.913.809l-.355 2.637c-.517.18-1.008.415-1.466.697l-2.367-1.054c-.42-.186-.912-.066-1.197.292l-.01.012c-.285.358-.285.864.002 1.221l1.633 2.02c-.253.508-.45 1.049-.577 1.617l-2.604.598c-.458.105-.782.513-.782.981 0 .468.324.876.782.981l2.604.598c.127.568.324 1.11.577 1.617l-1.633 2.02c-.287.357-.287.863-.002 1.221l.01.012c.285.358.777.478 1.197.292l2.367-1.054c.458.282.949.517 1.466.697l.355 2.637c.062.456.454.796.913.809.005 0 .009 0 .014 0 .465 0 .884-.328.967-.787l.39-2.65c.509-.186.992-.425 1.441-.711l2.415 1.074c.42.186.912.066 1.197-.292l.01-.012c.285-.358.285-.864-.002-1.221l-1.662-2.057c.248-.506.441-1.043.567-1.607l2.656-.61c.458-.105.782-.513.782-.981 0-.468-.324-.876-.782-.981l-2.656-.61c-.126-.564-.319-1.101-.567-1.607l1.662-2.057c.287-.357.287-.863.002-1.221l-.01-.012c-.285-.358-.777-.478-1.197-.292l-2.415 1.074c-.449-.286-.932-.525-1.441-.711l-.39-2.65zm-1.337 9.544a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Shopify — Datos Reales · {shopifyData.shopDomain}</h3>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-green-50 rounded-lg p-4">
+                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Órdenes Reales</p>
+                <p className="text-2xl font-bold text-green-900">{shopifyData.summary.totalOrders}</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-4">
+                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Revenue Real</p>
+                <p className="text-2xl font-bold text-green-900">{currencySymbol}{shopifyData.summary.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-4">
+                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Ticket Promedio</p>
+                <p className="text-2xl font-bold text-green-900">{currencySymbol}{shopifyData.summary.avgOrderValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+            </div>
+            {totals.revenue > 0 && (
+              <div className="mt-3 pt-3 border-t border-green-100">
+                <p className="text-xs text-slate-500">
+                  Meta reporta <strong className="text-slate-700">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> vs Shopify real <strong className="text-green-700">{currencySymbol}{shopifyData.summary.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                  {totals.revenue > 0 && (
+                    <span className={`ml-2 font-semibold ${shopifyData.summary.totalRevenue < totals.revenue * 0.8 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      ({((shopifyData.summary.totalRevenue / totals.revenue) * 100).toFixed(0)}% de atribución)
+                    </span>
+                  )}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
