@@ -15,10 +15,15 @@ type StatusFilter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
 interface Campaign {
   name: string
   status: string
+  budget: number
   spend: number
   impressions: number
+  clicks: number
   ctr: number
   frequency: number
+  cpc: number
+  cpm: number
+  cpa: number
   purchases: number
   addToCart: number
   initiateCheckout: number
@@ -438,18 +443,23 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <table className="w-full">
                 <thead>
                   <tr className="bg-slate-50/80">
-                    <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Salud</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Campaña</th>
-                    <th className="px-4 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Estado</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Gasto</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Impr.</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CTR</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Freq.</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">ATC</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">IC</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Compras</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Revenue</th>
-                    <th className="px-4 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">ROAS</th>
+                    <th className="px-3 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Salud</th>
+                    <th className="px-3 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Campaña</th>
+                    <th className="px-3 py-3 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Estado</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Budget</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Gasto</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Impr.</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Clicks</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CTR</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CPC</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CPM</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Freq.</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">ATC</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">IC</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Compras</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CPA</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Revenue</th>
+                    <th className="px-3 py-3 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">ROAS</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -458,27 +468,32 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     const hc = healthConfig[health]
                     return (
                       <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full ${hc.bg} ${hc.text} border ${hc.border}`}>
                             {hc.emoji} {hc.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3.5"><span className="font-medium text-slate-900 text-sm">{campaign.name}</span></td>
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5"><span className="font-medium text-slate-900 text-sm">{campaign.name}</span></td>
+                        <td className="px-3 py-3.5">
                           <span className={`inline-flex px-2 py-0.5 text-[10px] font-semibold rounded-full ${campaign.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700'
-                              : campaign.status === 'PAUSED' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                            : campaign.status === 'PAUSED' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
                             {campaign.status === 'ACTIVE' ? 'Activa' : campaign.status === 'PAUSED' ? 'Pausada' : 'Archivada'}
                           </span>
                         </td>
-                        <td className="px-4 py-3.5 text-right text-sm text-slate-700 font-medium tabular-nums">{currencySymbol}{campaign.spend.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                        <td className="px-4 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.impressions.toLocaleString()}</td>
-                        <td className={`px-4 py-3.5 text-right text-sm font-medium tabular-nums ${getCtrColor(campaign.ctr)}`}>{campaign.ctr.toFixed(2)}%</td>
-                        <td className={`px-4 py-3.5 text-right text-sm font-medium tabular-nums ${campaign.frequency > 3 ? 'text-red-600' : 'text-slate-500'}`}>{campaign.frequency.toFixed(1)}</td>
-                        <td className="px-4 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.addToCart}</td>
-                        <td className="px-4 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.initiateCheckout}</td>
-                        <td className="px-4 py-3.5 text-right text-sm font-semibold text-slate-900 tabular-nums">{campaign.purchases}</td>
-                        <td className="px-4 py-3.5 text-right text-sm font-medium text-emerald-600 tabular-nums">{currencySymbol}{campaign.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                        <td className={`px-4 py-3.5 text-right text-sm font-bold tabular-nums ${getRoasColor(campaign.roas)}`}>{campaign.roas.toFixed(2)}x</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-400 tabular-nums">{campaign.budget > 0 ? `${currencySymbol}${campaign.budget.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-700 font-medium tabular-nums">{currencySymbol}{campaign.spend.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.impressions.toLocaleString()}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.clicks.toLocaleString()}</td>
+                        <td className={`px-3 py-3.5 text-right text-sm font-medium tabular-nums ${getCtrColor(campaign.ctr)}`}>{campaign.ctr.toFixed(2)}%</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.cpc > 0 ? `${currencySymbol}${campaign.cpc.toFixed(2)}` : '—'}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.cpm > 0 ? `${currencySymbol}${campaign.cpm.toFixed(2)}` : '—'}</td>
+                        <td className={`px-3 py-3.5 text-right text-sm font-medium tabular-nums ${campaign.frequency > 3 ? 'text-red-600' : 'text-slate-500'}`}>{campaign.frequency.toFixed(1)}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.addToCart}</td>
+                        <td className="px-3 py-3.5 text-right text-sm text-slate-500 tabular-nums">{campaign.initiateCheckout}</td>
+                        <td className="px-3 py-3.5 text-right text-sm font-semibold text-slate-900 tabular-nums">{campaign.purchases}</td>
+                        <td className={`px-3 py-3.5 text-right text-sm font-medium tabular-nums ${campaign.cpa > 0 ? (campaign.roas >= 2 ? 'text-emerald-600' : campaign.roas >= 1 ? 'text-amber-600' : 'text-red-600') : 'text-slate-400'}`}>{campaign.cpa > 0 ? `${currencySymbol}${campaign.cpa.toFixed(2)}` : '—'}</td>
+                        <td className="px-3 py-3.5 text-right text-sm font-medium text-emerald-600 tabular-nums">{currencySymbol}{campaign.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className={`px-3 py-3.5 text-right text-sm font-bold tabular-nums ${getRoasColor(campaign.roas)}`}>{campaign.roas.toFixed(2)}x</td>
                       </tr>
                     )
                   })}

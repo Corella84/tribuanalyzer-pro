@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     }
 
     // Get campaigns
-    let campaignsUrl = `${BASE_URL}/${adAccountId}/campaigns?access_token=${accessToken}&fields=id,name,status&limit=100`
+    let campaignsUrl = `${BASE_URL}/${adAccountId}/campaigns?access_token=${accessToken}&fields=id,name,status,daily_budget,lifetime_budget&limit=100`
 
     const campaignsResponse = await fetch(campaignsUrl)
     const campaignsData = await campaignsResponse.json()
@@ -67,6 +67,11 @@ export async function GET(request: Request) {
     // Get insights for each campaign
     const campaignsWithInsights = await Promise.all(
       campaigns.map(async (campaign: any) => {
+        // Budget: Meta returns in cents, divide by 100
+        const dailyBudget = campaign.daily_budget ? parseFloat(campaign.daily_budget) / 100 : 0
+        const lifetimeBudget = campaign.lifetime_budget ? parseFloat(campaign.lifetime_budget) / 100 : 0
+        const budget = dailyBudget || lifetimeBudget
+
         try {
           const insightsUrl = `${BASE_URL}/${campaign.id}/insights?access_token=${accessToken}&fields=campaign_name,spend,impressions,clicks,ctr,frequency,actions,action_values&date_preset=${datePreset}`
 
@@ -78,31 +83,47 @@ export async function GET(request: Request) {
 
           if (insights) {
             const spend = parseFloat(insights.spend || '0')
+            const clicks = parseInt(insights.clicks || '0')
+            const impressions = parseInt(insights.impressions || '0')
             const revenue = extractRevenue(insights.action_values)
+            const purchases = extractPurchases(insights.actions)
             const roas = spend > 0 ? revenue / spend : 0
+            const cpc = clicks > 0 ? spend / clicks : 0
+            const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0
+            const cpa = purchases > 0 ? spend / purchases : 0
 
             return {
               name: insights.campaign_name || campaign.name,
               status: campaign.status,
-              spend: spend,
-              impressions: parseInt(insights.impressions || '0'),
+              budget,
+              spend,
+              impressions,
+              clicks,
               ctr: parseFloat(insights.ctr || '0'),
               frequency: parseFloat(insights.frequency || '0'),
-              purchases: extractPurchases(insights.actions),
+              cpc,
+              cpm,
+              cpa,
+              purchases,
               addToCart: extractAction(insights.actions, ['omni_add_to_cart', 'add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart']),
               initiateCheckout: extractAction(insights.actions, ['omni_initiated_checkout', 'initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout']),
-              revenue: revenue,
-              roas: roas,
+              revenue,
+              roas,
             }
           }
 
           return {
             name: campaign.name,
             status: campaign.status,
+            budget,
             spend: 0,
             impressions: 0,
+            clicks: 0,
             ctr: 0,
             frequency: 0,
+            cpc: 0,
+            cpm: 0,
+            cpa: 0,
             purchases: 0,
             addToCart: 0,
             initiateCheckout: 0,
@@ -113,10 +134,15 @@ export async function GET(request: Request) {
           return {
             name: campaign.name,
             status: campaign.status,
+            budget,
             spend: 0,
             impressions: 0,
+            clicks: 0,
             ctr: 0,
             frequency: 0,
+            cpc: 0,
+            cpm: 0,
+            cpa: 0,
             purchases: 0,
             addToCart: 0,
             initiateCheckout: 0,

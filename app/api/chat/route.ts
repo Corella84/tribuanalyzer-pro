@@ -51,16 +51,20 @@ export async function POST(request: Request) {
             const cleanedData = campaigns.map((c: any) => ({
                 nombre: c.name,
                 estado: c.status,
+                presupuesto_diario: c.budget,
                 gasto: c.spend,
                 impresiones: c.impressions,
+                clicks: c.clicks,
                 ctr: c.ctr,
+                cpc: c.cpc,
+                cpm: c.cpm,
                 frecuencia: c.frequency,
                 añadidos_carrito: c.addToCart,
                 pagos_iniciados: c.initiateCheckout,
                 compras: c.purchases,
+                cpa: c.cpa,
                 revenue: c.revenue,
                 roas: c.roas,
-                cpa: c.purchases > 0 ? (c.spend / c.purchases).toFixed(2) : null,
             }))
 
             campaignContext = `
