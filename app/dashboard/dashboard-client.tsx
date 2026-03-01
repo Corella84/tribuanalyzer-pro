@@ -224,11 +224,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     try {
       const res = await fetch(`/api/shopify/orders?date_preset=${datePreset}`)
       const data = await res.json()
-      if (data.needsConnection) {
-        setNeedsShopifyConnection(true)
-      } else if (data.success) {
+      if (data.success) {
         setShopifyData(data)
         setNeedsShopifyConnection(false)
+      } else {
+        setNeedsShopifyConnection(true)
       }
     } catch {
       setNeedsShopifyConnection(true)
