@@ -369,46 +369,6 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           </div>
         )}
 
-        {/* Shopify Real Revenue vs Meta */}
-        {shopifyData && !shopifyLoading && (
-          <div className="bg-white rounded-xl border border-green-200 p-5 mb-6 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-green-700" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M15.337 2.456c-.083-.459-.502-.787-.967-.787-.005 0-.009 0-.014 0-.459.013-.851.353-.913.809l-.355 2.637c-.517.18-1.008.415-1.466.697l-2.367-1.054c-.42-.186-.912-.066-1.197.292l-.01.012c-.285.358-.285.864.002 1.221l1.633 2.02c-.253.508-.45 1.049-.577 1.617l-2.604.598c-.458.105-.782.513-.782.981 0 .468.324.876.782.981l2.604.598c.127.568.324 1.11.577 1.617l-1.633 2.02c-.287.357-.287.863-.002 1.221l.01.012c.285.358.777.478 1.197.292l2.367-1.054c.458.282.949.517 1.466.697l.355 2.637c.062.456.454.796.913.809.005 0 .009 0 .014 0 .465 0 .884-.328.967-.787l.39-2.65c.509-.186.992-.425 1.441-.711l2.415 1.074c.42.186.912.066 1.197-.292l.01-.012c.285-.358.285-.864-.002-1.221l-1.662-2.057c.248-.506.441-1.043.567-1.607l2.656-.61c.458-.105.782-.513.782-.981 0-.468-.324-.876-.782-.981l-2.656-.61c-.126-.564-.319-1.101-.567-1.607l1.662-2.057c.287-.357.287-.863.002-1.221l-.01-.012c-.285-.358-.777-.478-1.197-.292l-2.415 1.074c-.449-.286-.932-.525-1.441-.711l-.39-2.65zm-1.337 9.544a2 2 0 11-4 0 2 2 0 014 0z"/>
-                </svg>
-              </div>
-              <h3 className="font-bold text-slate-900 text-sm">Shopify — Datos Reales · {shopifyData.shopDomain}</h3>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-green-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Órdenes Reales</p>
-                <p className="text-2xl font-bold text-green-900">{shopifyData.summary.totalOrders}</p>
-              </div>
-              <div className="bg-green-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Revenue Real</p>
-                <p className="text-2xl font-bold text-green-900">{currencySymbol}{shopifyData.summary.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-              <div className="bg-green-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-1">Ticket Promedio</p>
-                <p className="text-2xl font-bold text-green-900">{currencySymbol}{shopifyData.summary.avgOrderValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-            </div>
-            {totals.revenue > 0 && (
-              <div className="mt-3 pt-3 border-t border-green-100">
-                <p className="text-xs text-slate-500">
-                  Meta reporta <strong className="text-slate-700">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> vs Shopify real <strong className="text-green-700">{currencySymbol}{shopifyData.summary.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
-                  {totals.revenue > 0 && (
-                    <span className={`ml-2 font-semibold ${shopifyData.summary.totalRevenue < totals.revenue * 0.8 ? 'text-red-600' : 'text-emerald-600'}`}>
-                      ({((shopifyData.summary.totalRevenue / totals.revenue) * 100).toFixed(0)}% de atribución)
-                    </span>
-                  )}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <p className="text-red-700 text-sm">{error}</p>
@@ -463,61 +423,134 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           </div>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        {/* === THREE SECTIONS: Meta | Shopify | Blended === */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+          {/* META ADS */}
+          <div className="bg-white rounded-xl border border-blue-200/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-blue-700" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.04c-5.5 0-10 4.49-10 10.02 0 5 3.66 9.15 8.44 9.9v-7H7.9v-2.9h2.54V9.85c0-2.52 1.49-3.93 3.78-3.93 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.88h2.78l-.45 2.9h-2.33v7a10 10 0 008.44-9.9c0-5.53-4.5-10.02-10-10.02z"/></svg>
               </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Gasto</span>
+              <h3 className="font-bold text-slate-900 text-sm">Meta Ads</h3>
             </div>
-            <p className="text-2xl font-bold text-slate-900">{currencySymbol}{totals.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+            <div className="space-y-3">
+              <div className="bg-blue-50/50 rounded-lg p-3">
+                <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Gasto</p>
+                <p className="text-xl font-bold text-slate-900">{currencySymbol}{totals.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              </div>
+              <div className="bg-blue-50/50 rounded-lg p-3">
+                <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Revenue (Meta)</p>
+                <p className="text-xl font-bold text-blue-700">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-blue-50/50 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">ROAS Meta</p>
+                  <p className={`text-xl font-bold ${getRoasColor(roasGeneral)}`}>{roasGeneral.toFixed(2)}x</p>
+                </div>
+                <div className="bg-blue-50/50 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Compras</p>
+                  <p className="text-xl font-bold text-slate-900">{totals.purchases}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-blue-50/50 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CPA</p>
+                  <p className="text-xl font-bold text-slate-900">{currencySymbol}{cpaGeneral.toFixed(2)}</p>
+                </div>
+                <div className="bg-blue-50/50 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CTR</p>
+                  <p className={`text-xl font-bold ${getCtrColor(ctrPromedio)}`}>{ctrPromedio.toFixed(2)}%</p>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+
+          {/* SHOPIFY */}
+          <div className="bg-white rounded-xl border border-green-200/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-green-700" fill="currentColor" viewBox="0 0 24 24"><path d="M15.34 2.46c-.08-.46-.5-.79-.97-.79h-.01c-.46.01-.85.35-.91.81l-.36 2.64c-.52.18-1.01.41-1.47.7l-2.37-1.05c-.42-.19-.91-.07-1.2.29l-.01.01c-.28.36-.28.86 0 1.22l1.63 2.02c-.25.51-.45 1.05-.58 1.62l-2.6.6c-.46.1-.78.51-.78.98s.32.88.78.98l2.6.6c.13.57.32 1.11.58 1.62l-1.63 2.02c-.29.36-.29.86 0 1.22l.01.01c.28.36.78.48 1.2.29l2.37-1.05c.46.28.95.52 1.47.7l.36 2.64c.06.46.45.8.91.81h.01c.47 0 .88-.33.97-.79l.39-2.65c.51-.19.99-.43 1.44-.71l2.42 1.07c.42.19.91.07 1.2-.29l.01-.01c.28-.36.28-.86 0-1.22l-1.66-2.06c.25-.51.44-1.04.57-1.61l2.66-.61c.46-.1.78-.51.78-.98s-.32-.88-.78-.98l-2.66-.61c-.13-.56-.32-1.1-.57-1.61l1.66-2.06c.29-.36.29-.86 0-1.22l-.01-.01c-.28-.36-.78-.48-1.2-.29l-2.42 1.07c-.45-.29-.93-.53-1.44-.71l-.39-2.65zM14 12a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
               </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Revenue</span>
+              <h3 className="font-bold text-slate-900 text-sm">Shopify{shopifyData ? ` · ${shopifyData.shopDomain}` : ''}</h3>
             </div>
-            <p className="text-2xl font-bold text-emerald-600">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+            {shopifyData && !shopifyLoading ? (
+              <div className="space-y-3">
+                <div className="bg-green-50/50 rounded-lg p-3">
+                  <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wider mb-0.5">Revenue Real</p>
+                  <p className="text-xl font-bold text-green-800">{currencySymbol}{shopifyData.summary.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-green-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wider mb-0.5">Órdenes</p>
+                    <p className="text-xl font-bold text-green-900">{shopifyData.summary.totalOrders}</p>
+                  </div>
+                  <div className="bg-green-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-green-600 uppercase tracking-wider mb-0.5">Ticket Promedio</p>
+                    <p className="text-xl font-bold text-green-900">{currencySymbol}{shopifyData.summary.avgOrderValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  </div>
+                </div>
+              </div>
+            ) : shopifyLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400 mb-3">Conecta Shopify para ver datos reales</p>
+                <button onClick={handleConnectShopify} className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all">
+                  Conectar Shopify
+                </button>
+              </div>
+            )}
           </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${roasGeneral >= 2 ? 'bg-emerald-50' : roasGeneral >= 1 ? 'bg-amber-50' : 'bg-red-50'}`}>
-                <span className="text-sm">{roasGeneral >= 2 ? '🟢' : roasGeneral >= 1 ? '🟡' : '🔴'}</span>
+
+          {/* BLENDED */}
+          <div className="bg-white rounded-xl border border-purple-200/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-purple-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
               </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">ROAS</span>
+              <h3 className="font-bold text-slate-900 text-sm">Blended</h3>
             </div>
-            <p className={`text-2xl font-bold ${getRoasColor(roasGeneral)}`}>{roasGeneral.toFixed(2)}x</p>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg>
+            {shopifyData && totals.spend > 0 ? (() => {
+              const realRevenue = shopifyData.summary.totalRevenue
+              const adSpend = totals.spend
+              const roasBlended = adSpend > 0 ? realRevenue / adSpend : 0
+              const profit = realRevenue - adSpend
+              const realOrders = shopifyData.summary.totalOrders
+              const cpaReal = realOrders > 0 ? adSpend / realOrders : 0
+              const attrPct = totals.revenue > 0 ? (realRevenue / totals.revenue) * 100 : 0
+              return (
+                <div className="space-y-3">
+                  <div className="bg-purple-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">ROAS Blended</p>
+                    <p className={`text-2xl font-bold ${getRoasColor(roasBlended)}`}>{roasBlended.toFixed(2)}x</p>
+                  </div>
+                  <div className="bg-purple-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">Profit</p>
+                    <p className={`text-xl font-bold ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{currencySymbol}{profit.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-purple-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">CPA Real</p>
+                      <p className="text-xl font-bold text-slate-900">{currencySymbol}{cpaReal.toFixed(2)}</p>
+                    </div>
+                    <div className="bg-purple-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">Atribución</p>
+                      <p className={`text-xl font-bold ${attrPct > 120 ? 'text-emerald-600' : attrPct >= 80 ? 'text-amber-600' : 'text-red-600'}`}>{attrPct.toFixed(0)}%</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-purple-100">
+                    <p className="text-[10px] text-slate-400">Meta dice {currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0 })} · Shopify real {currencySymbol}{realRevenue.toLocaleString('en-US', { minimumFractionDigits: 0 })}</p>
+                  </div>
+                </div>
+              )
+            })() : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400">{!shopifyData ? 'Conecta Shopify para ver el blended' : 'Sin datos de Meta Ads'}</p>
               </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Compras</span>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{totals.purchases}</p>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center">
-                <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>
-              </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">CPA</span>
-            </div>
-            <p className="text-2xl font-bold text-slate-900">{currencySymbol}{cpaGeneral.toFixed(2)}</p>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${ctrPromedio >= 1.5 ? 'bg-emerald-50' : ctrPromedio >= 0.8 ? 'bg-amber-50' : 'bg-red-50'}`}>
-                <svg className={`w-4 h-4 ${getCtrColor(ctrPromedio)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /></svg>
-              </div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">CTR</span>
-            </div>
-            <p className={`text-2xl font-bold ${getCtrColor(ctrPromedio)}`}>{ctrPromedio.toFixed(2)}%</p>
+            )}
           </div>
         </div>
 
