@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 const SHOPIFY_API_VERSION = '2024-10'
 
 async function refreshShopifyToken(shop: string): Promise<string | null> {
-  const clientId = process.env.SHOPIFY_API_KEY
-  const clientSecret = process.env.SHOPIFY_API_SECRET
+  const clientId = process.env.SHOPIFY_API_KEY?.trim()
+  const clientSecret = process.env.SHOPIFY_API_SECRET?.trim()
   if (!clientId || !clientSecret) return null
 
   const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
