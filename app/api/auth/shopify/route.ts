@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      redirect: 'follow',
       body: new URLSearchParams({
         client_id: SHOPIFY_API_KEY,
         client_secret: SHOPIFY_API_SECRET,
@@ -29,7 +30,14 @@ export async function GET(request: Request) {
       }),
     })
 
-    const tokenData = await tokenResponse.json()
+    const responseText = await tokenResponse.text()
+    let tokenData: any
+    try {
+      tokenData = JSON.parse(responseText)
+    } catch {
+      console.error('Shopify non-JSON response:', tokenResponse.status, responseText.slice(0, 500))
+      return NextResponse.redirect(`${origin}/dashboard?error=shopify_auth_error`)
+    }
 
     if (!tokenData.access_token) {
       console.error('Shopify client credentials error:', tokenData)
