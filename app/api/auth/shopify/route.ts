@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY
-const SHOPIFY_SCOPES = 'read_orders,read_products,read_analytics'
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET
 
 export async function GET(request: Request) {
   const { origin } = new URL(request.url)
@@ -12,34 +12,52 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(`${origin}/login`)
 
-  // Get shop from query param or env (single-store mode)
-  const { searchParams } = new URL(request.url)
-  const shop = searchParams.get('shop') || process.env.SHOPIFY_SHOP_DOMAIN
-
-  if (!shop) {
-    return NextResponse.redirect(`${origin}/dashboard?error=shopify_no_shop`)
-  }
-
-  if (!SHOPIFY_API_KEY) {
+  const shop = process.env.SHOPIFY_SHOP_DOMAIN
+  if (!shop || !SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
     return NextResponse.redirect(`${origin}/dashboard?error=shopify_not_configured`)
   }
 
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/shopify/callback`
-  const nonce = crypto.randomUUID().replace(/-/g, '')
+  try {
+    // Client credentials grant (Shopify Dev Dashboard apps, post-Jan 2026)
+    const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        grant_type: 'client_credentials',
+      }),
+    })
 
-  // Store nonce in cookie for verification
-  const authUrl = new URL(`https://${shop}/admin/oauth/authorize`)
-  authUrl.searchParams.set('client_id', SHOPIFY_API_KEY)
-  authUrl.searchParams.set('scope', SHOPIFY_SCOPES)
-  authUrl.searchParams.set('redirect_uri', redirectUri)
-  authUrl.searchParams.set('state', nonce)
+    const tokenData = await tokenResponse.json()
 
-  const response = NextResponse.redirect(authUrl.toString())
-  response.cookies.set('shopify_oauth_nonce', nonce, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 300, // 5 min
-  })
-  return response
+    if (!tokenData.access_token) {
+      console.error('Shopify client credentials error:', tokenData)
+      return NextResponse.redirect(`${origin}/dashboard?error=shopify_no_token`)
+    }
+
+    // Save connection to Supabase
+    const expiresAt = new Date(Date.now() + (tokenData.expires_in || 86399) * 1000).toISOString()
+
+    const { error: upsertError } = await supabase
+      .from('shopify_connections')
+      .upsert({
+        user_id: user.id,
+        shop_domain: shop,
+        access_token: tokenData.access_token,
+        scope: tokenData.scope || '',
+        connected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+
+    if (upsertError) {
+      console.error('Error saving Shopify connection:', upsertError)
+    }
+
+    return NextResponse.redirect(`${origin}/dashboard?shopify=connected`)
+
+  } catch (err) {
+    console.error('Shopify auth error:', err)
+    return NextResponse.redirect(`${origin}/dashboard?error=shopify_auth_error`)
+  }
 }
