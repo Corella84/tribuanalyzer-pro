@@ -434,36 +434,53 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               </div>
               <h3 className="font-bold text-slate-900 text-sm">Meta Ads</h3>
             </div>
-            <div className="space-y-3">
-              <div className="bg-blue-50/50 rounded-lg p-3">
-                <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Gasto</p>
-                <p className="text-xl font-bold text-slate-900">{currencySymbol}{totals.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
-              </div>
-              <div className="bg-blue-50/50 rounded-lg p-3">
-                <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Revenue (Meta)</p>
-                <p className="text-xl font-bold text-blue-700">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            {!loading && !needsConnection && filteredCampaigns.length > 0 ? (
+              <div className="space-y-3">
                 <div className="bg-blue-50/50 rounded-lg p-3">
-                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">ROAS Meta</p>
-                  <p className={`text-xl font-bold ${getRoasColor(roasGeneral)}`}>{roasGeneral.toFixed(2)}x</p>
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Gasto</p>
+                  <p className="text-xl font-bold text-slate-900">{currencySymbol}{totals.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                 </div>
                 <div className="bg-blue-50/50 rounded-lg p-3">
-                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Compras</p>
-                  <p className="text-xl font-bold text-slate-900">{totals.purchases}</p>
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Revenue (Meta)</p>
+                  <p className="text-xl font-bold text-blue-700">{currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-blue-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">ROAS Meta</p>
+                    <p className={`text-xl font-bold ${getRoasColor(roasGeneral)}`}>{roasGeneral.toFixed(2)}x</p>
+                  </div>
+                  <div className="bg-blue-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">Compras</p>
+                    <p className="text-xl font-bold text-slate-900">{totals.purchases}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-blue-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CPA</p>
+                    <p className="text-xl font-bold text-slate-900">{currencySymbol}{cpaGeneral.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-blue-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CTR</p>
+                    <p className={`text-xl font-bold ${getCtrColor(ctrPromedio)}`}>{ctrPromedio.toFixed(2)}%</p>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-50/50 rounded-lg p-3">
-                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CPA</p>
-                  <p className="text-xl font-bold text-slate-900">{currencySymbol}{cpaGeneral.toFixed(2)}</p>
-                </div>
-                <div className="bg-blue-50/50 rounded-lg p-3">
-                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-0.5">CTR</p>
-                  <p className={`text-xl font-bold ${getCtrColor(ctrPromedio)}`}>{ctrPromedio.toFixed(2)}%</p>
-                </div>
+            ) : loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
               </div>
-            </div>
+            ) : needsConnection ? (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400 mb-3">Conecta Meta para ver métricas</p>
+                <button onClick={handleConnectMeta} className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-all">
+                  Conectar Meta Ads
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400">No hay campañas con el filtro actual</p>
+              </div>
+            )}
           </div>
 
           {/* SHOPIFY */}
@@ -513,7 +530,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               </div>
               <h3 className="font-bold text-slate-900 text-sm">Blended</h3>
             </div>
-            {shopifyData && totals.spend > 0 ? (() => {
+            {loading || shopifyLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+              </div>
+            ) : shopifyData && totals.spend > 0 ? (() => {
               const realRevenue = shopifyData.summary.totalRevenue
               const adSpend = totals.spend
               const roasBlended = adSpend > 0 ? realRevenue / adSpend : 0
@@ -548,7 +569,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               )
             })() : (
               <div className="text-center py-8">
-                <p className="text-sm text-slate-400">{!shopifyData ? 'Conecta Shopify para ver el blended' : 'Sin datos de Meta Ads'}</p>
+                <p className="text-sm text-slate-400">
+                  {needsConnection && needsShopifyConnection ? 'Conecta Meta y Shopify' :
+                   needsConnection ? 'Conecta Meta Ads para ver el blended' :
+                   !shopifyData ? 'Conecta Shopify para ver el blended' :
+                   'Sin campañas con el filtro actual'}
+                </p>
               </div>
             )}
           </div>
