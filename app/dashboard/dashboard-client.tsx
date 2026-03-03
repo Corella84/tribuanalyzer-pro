@@ -238,6 +238,21 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   const handleConnectMeta = () => { window.location.href = '/api/auth/meta' }
   const handleConnectShopify = () => { window.location.href = '/api/auth/shopify' }
+  const handleDisconnectMeta = async () => {
+    try {
+      const res = await fetch('/api/auth/meta/disconnect', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setNeedsConnection(true)
+        setCampaigns([])
+        setAccounts([])
+        setSelectedAccount('')
+        setError(null)
+      }
+    } catch {
+      setError('Error al desconectar Meta')
+    }
+  }
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login'); router.refresh() }
 
   const totals = filteredCampaigns.reduce((acc, c) => ({
@@ -371,7 +386,19 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-            <p className="text-red-700 text-sm">{error}</p>
+            <div className="flex items-start justify-between gap-4">
+              <p className="text-red-700 text-sm">{error}</p>
+              <div className="flex gap-2 flex-shrink-0">
+                <button onClick={handleDisconnectMeta}
+                  className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-100 hover:bg-red-200 rounded-lg transition-all">
+                  Desconectar
+                </button>
+                <button onClick={handleConnectMeta}
+                  className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-all">
+                  Reconectar
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

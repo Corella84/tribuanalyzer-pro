@@ -32,7 +32,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=no_token`)
     }
 
-    const accessToken = tokenData.access_token
+    const accessToken = tokenData.access_token.trim()
 
     // Get user's ad accounts
     const accountsResponse = await fetch(

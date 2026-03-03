@@ -33,7 +33,7 @@ export async function GET(request: Request) {
       }, { status: 400 })
     }
 
-    const accessToken = connection.access_token
+    const accessToken = connection.access_token.trim()
     const adAccountId = accountId || connection.ad_accounts?.[0]?.id
 
     if (!adAccountId) {
