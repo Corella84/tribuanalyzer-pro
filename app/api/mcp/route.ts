@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 
 const META_API_VERSION = 'v21.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
@@ -10,10 +11,7 @@ function authenticate(request: NextRequest): boolean {
 }
 
 // ── Meta API helper ───────────────────────────────────────────────────
-async function metaFetch(path: string, params: Record<string, string> = {}) {
-  const token = process.env.META_ACCESS_TOKEN?.trim()
-  if (!token) throw new Error('META_ACCESS_TOKEN not configured')
-
+async function metaFetch(token: string, path: string, params: Record<string, string> = {}) {
   const url = new URL(`${BASE_URL}/${path}`)
   url.searchParams.set('access_token', token)
   for (const [k, v] of Object.entries(params)) {
@@ -92,8 +90,8 @@ const TOOLS = [
 ]
 
 // ── Tool implementations ──────────────────────────────────────────────
-async function handleGetAdAccounts() {
-  const data = await metaFetch('me/adaccounts', {
+async function handleGetAdAccounts(token: string) {
+  const data = await metaFetch(token, 'me/adaccounts', {
     fields: 'id,name,account_status,currency,timezone_name,amount_spent',
     limit: '100',
   })
@@ -110,10 +108,10 @@ async function handleGetAdAccounts() {
   return { accounts, total: accounts.length }
 }
 
-async function handleGetCampaigns(args: any) {
+async function handleGetCampaigns(token: string, args: any) {
   const { account_id, status_filter = 'ALL', date_preset = 'last_7d' } = args
 
-  const data = await metaFetch(`${account_id}/campaigns`, {
+  const data = await metaFetch(token, `${account_id}/campaigns`, {
     fields: 'id,name,status,objective,daily_budget,lifetime_budget',
     limit: '100',
   })
@@ -130,7 +128,7 @@ async function handleGetCampaigns(args: any) {
 
       let insights: any = {}
       try {
-        const insData = await metaFetch(`${c.id}/insights`, {
+        const insData = await metaFetch(token, `${c.id}/insights`, {
           fields: 'spend,impressions,clicks,actions,action_values',
           date_preset,
         })
@@ -160,7 +158,7 @@ async function handleGetCampaigns(args: any) {
   return { campaigns: results, total: results.length, date_preset }
 }
 
-async function handleGetCampaignInsights(args: any) {
+async function handleGetCampaignInsights(token: string, args: any) {
   const { campaign_id, date_preset = 'last_7d', time_increment } = args
 
   const params: Record<string, string> = {
@@ -169,7 +167,7 @@ async function handleGetCampaignInsights(args: any) {
   }
   if (time_increment) params.time_increment = time_increment
 
-  const data = await metaFetch(`${campaign_id}/insights`, params)
+  const data = await metaFetch(token, `${campaign_id}/insights`, params)
   const rows = data.data || []
 
   const insights = rows.map((row: any) => {
@@ -203,10 +201,10 @@ async function handleGetCampaignInsights(args: any) {
   return { insights, total: insights.length, date_preset }
 }
 
-async function handleGetAdsets(args: any) {
+async function handleGetAdsets(token: string, args: any) {
   const { parent_id, date_preset = 'last_7d' } = args
 
-  const data = await metaFetch(`${parent_id}/adsets`, {
+  const data = await metaFetch(token, `${parent_id}/adsets`, {
     fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,targeting',
     limit: '100',
   })
@@ -218,7 +216,7 @@ async function handleGetAdsets(args: any) {
 
       let insights: any = {}
       try {
-        const insData = await metaFetch(`${as.id}/insights`, {
+        const insData = await metaFetch(token, `${as.id}/insights`, {
           fields: 'spend,impressions,clicks,actions,action_values',
           date_preset,
         })
@@ -249,10 +247,10 @@ async function handleGetAdsets(args: any) {
   return { adsets, total: adsets.length, date_preset }
 }
 
-async function handleGetAds(args: any) {
+async function handleGetAds(token: string, args: any) {
   const { parent_id, date_preset = 'last_7d' } = args
 
-  const data = await metaFetch(`${parent_id}/ads`, {
+  const data = await metaFetch(token, `${parent_id}/ads`, {
     fields: 'id,name,status,creative{id,thumbnail_url,effective_object_story_id}',
     limit: '50',
   })
@@ -261,7 +259,7 @@ async function handleGetAds(args: any) {
     (data.data || []).map(async (ad: any) => {
       let insights: any = {}
       try {
-        const insData = await metaFetch(`${ad.id}/insights`, {
+        const insData = await metaFetch(token, `${ad.id}/insights`, {
           fields: 'spend,impressions,clicks,actions,action_values',
           date_preset,
         })
@@ -364,23 +362,42 @@ async function handleMcpMessage(msg: any) {
       const toolName = params?.name
       const args = params?.arguments || {}
 
+      // Get Meta token from Supabase (same as app/api/meta/campaigns/route.ts)
+      const supabase = await createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        return jsonrpcError(id, -32000, 'Not authenticated: no Supabase user session')
+      }
+
+      const { data: connection } = await supabase
+        .from('meta_connections')
+        .select('access_token')
+        .eq('user_id', user.id)
+        .single()
+
+      if (!connection?.access_token) {
+        return jsonrpcError(id, -32000, 'Meta not connected: no access_token found for user')
+      }
+
+      const accessToken = connection.access_token.trim()
+
       try {
         let result: any
         switch (toolName) {
           case 'get_ad_accounts':
-            result = await handleGetAdAccounts()
+            result = await handleGetAdAccounts(accessToken)
             break
           case 'get_campaigns':
-            result = await handleGetCampaigns(args)
+            result = await handleGetCampaigns(accessToken, args)
             break
           case 'get_campaign_insights':
-            result = await handleGetCampaignInsights(args)
+            result = await handleGetCampaignInsights(accessToken, args)
             break
           case 'get_adsets':
-            result = await handleGetAdsets(args)
+            result = await handleGetAdsets(accessToken, args)
             break
           case 'get_ads':
-            result = await handleGetAds(args)
+            result = await handleGetAds(accessToken, args)
             break
           default:
             return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
