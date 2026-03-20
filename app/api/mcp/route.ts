@@ -4,6 +4,17 @@ import { createClient } from '@/lib/supabase/server'
 const META_API_VERSION = 'v21.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
 
+// ── CORS ──────────────────────────────────────────────────────────────
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-mcp-secret',
+}
+
+function corsJson(body: any, status = 200) {
+  return NextResponse.json(body, { status, headers: CORS_HEADERS })
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────
 function authenticate(request: NextRequest): boolean {
   const secret = request.headers.get('x-mcp-secret') || request.headers.get('authorization')?.replace('Bearer ', '')
@@ -362,24 +373,31 @@ async function handleMcpMessage(msg: any) {
       const toolName = params?.name
       const args = params?.arguments || {}
 
-      // Get Meta token from Supabase (same as app/api/meta/campaigns/route.ts)
-      const supabase = await createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        return jsonrpcError(id, -32000, 'Not authenticated: no Supabase user session')
+      // Try Supabase session first, fall back to META_ACCESS_TOKEN env var
+      let accessToken: string | null = null
+
+      try {
+        const supabase = await createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: connection } = await supabase
+            .from('meta_connections')
+            .select('access_token')
+            .eq('user_id', user.id)
+            .single()
+          if (connection?.access_token) {
+            accessToken = connection.access_token.trim()
+          }
+        }
+      } catch { /* no browser session available */ }
+
+      if (!accessToken) {
+        accessToken = process.env.META_ACCESS_TOKEN?.trim() || null
       }
 
-      const { data: connection } = await supabase
-        .from('meta_connections')
-        .select('access_token')
-        .eq('user_id', user.id)
-        .single()
-
-      if (!connection?.access_token) {
-        return jsonrpcError(id, -32000, 'Meta not connected: no access_token found for user')
+      if (!accessToken) {
+        return jsonrpcError(id, -32000, 'No Meta token: no Supabase session and META_ACCESS_TOKEN not set')
       }
-
-      const accessToken = connection.access_token.trim()
 
       try {
         let result: any
@@ -420,11 +438,15 @@ async function handleMcpMessage(msg: any) {
 }
 
 // ── HTTP handlers ─────────────────────────────────────────────────────
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+}
+
 export async function POST(request: NextRequest) {
   if (!authenticate(request)) {
-    return NextResponse.json(
+    return corsJson(
       jsonrpcError(null, -32000, 'Unauthorized: invalid or missing MCP_SECRET'),
-      { status: 401 }
+      401
     )
   }
 
@@ -434,28 +456,28 @@ export async function POST(request: NextRequest) {
     // Handle batch requests
     if (Array.isArray(body)) {
       const results = await Promise.all(body.map(handleMcpMessage))
-      return NextResponse.json(results.filter(Boolean))
+      return corsJson(results.filter(Boolean))
     }
 
     const result = await handleMcpMessage(body)
     if (!result) {
-      return new NextResponse(null, { status: 204 })
+      return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
     }
-    return NextResponse.json(result)
+    return corsJson(result)
   } catch (err: any) {
-    return NextResponse.json(
+    return corsJson(
       jsonrpcError(null, -32700, `Parse error: ${err.message}`),
-      { status: 400 }
+      400
     )
   }
 }
 
 export async function GET(request: NextRequest) {
   if (!authenticate(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return corsJson({ error: 'Unauthorized' }, 401)
   }
 
-  return NextResponse.json({
+  return corsJson({
     name: 'tribuanalyzer-meta-ads',
     version: '1.0.0',
     protocol: 'MCP 2024-11-05',
