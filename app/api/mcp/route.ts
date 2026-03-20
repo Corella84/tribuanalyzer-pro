@@ -32,6 +32,49 @@ async function metaFetch(token: string, path: string, params: Record<string, str
   return data
 }
 
+// ── Shopify API helper ────────────────────────────────────────────────
+const SHOPIFY_API_VERSION = '2024-10'
+
+async function getShopifyToken(): Promise<{ token: string; shop: string }> {
+  const shop = process.env.SHOPIFY_SHOP_DOMAIN?.trim()
+  const clientId = process.env.SHOPIFY_API_KEY?.trim()
+  const clientSecret = process.env.SHOPIFY_API_SECRET?.trim()
+
+  if (!shop || !clientId || !clientSecret) {
+    throw new Error('Shopify not configured: missing SHOPIFY_SHOP_DOMAIN, SHOPIFY_API_KEY, or SHOPIFY_API_SECRET')
+  }
+
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'client_credentials',
+    }),
+  })
+  const data = await res.json()
+  if (!data.access_token) throw new Error('Shopify: failed to get access token')
+  return { token: data.access_token, shop }
+}
+
+async function shopifyFetch(token: string, shop: string, endpoint: string, params: Record<string, string> = {}) {
+  const url = new URL(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/${endpoint}`)
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v)
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Shopify API ${res.status}: ${err.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
 // ── Tool definitions ──────────────────────────────────────────────────
 const TOOLS = [
   {
@@ -90,6 +133,39 @@ const TOOLS = [
         date_preset: { type: 'string', description: 'Date preset for insights', default: 'last_7d' },
       },
       required: ['parent_id'],
+    },
+  },
+  // ── Shopify tools ──
+  {
+    name: 'get_products',
+    description: 'Get products from the Shopify store. Returns title, status, vendor, product_type, variants with prices and inventory, and tags.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'string', description: 'Number of products to return (max 250, default 50)', default: '50' },
+        collection_id: { type: 'string', description: 'Filter by collection ID' },
+        status: { type: 'string', description: 'Filter by status: active, draft, archived (default active)', default: 'active' },
+      },
+    },
+  },
+  {
+    name: 'get_orders',
+    description: 'Get orders from the Shopify store. Returns order name, date, total, financial status, line items, and source. Defaults to last 7 days.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        days: { type: 'string', description: 'Number of days to look back (default 7)', default: '7' },
+        status: { type: 'string', description: 'Order status: any, open, closed, cancelled (default any)', default: 'any' },
+        limit: { type: 'string', description: 'Number of orders to return (max 250, default 50)', default: '50' },
+      },
+    },
+  },
+  {
+    name: 'get_collections',
+    description: 'Get collections (custom/manual) from the Shopify store. Returns collection id, title, and product count.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
     },
   },
 ]
@@ -292,6 +368,102 @@ async function handleGetAds(token: string, args: any) {
   return { ads, total: ads.length, date_preset }
 }
 
+// ── Shopify tool implementations ──────────────────────────────────────
+async function handleGetProducts(args: any) {
+  const { token, shop } = await getShopifyToken()
+  const { limit = '50', collection_id, status = 'active' } = args
+
+  const params: Record<string, string> = {
+    limit,
+    status,
+    fields: 'id,title,status,vendor,product_type,tags,variants,images',
+  }
+  if (collection_id) params.collection_id = collection_id
+
+  const data = await shopifyFetch(token, shop, 'products.json', params)
+  const products = (data.products || []).map((p: any) => ({
+    id: p.id,
+    title: p.title,
+    status: p.status,
+    vendor: p.vendor,
+    product_type: p.product_type,
+    tags: p.tags,
+    image: p.images?.[0]?.src || null,
+    variants: (p.variants || []).map((v: any) => ({
+      id: v.id,
+      title: v.title,
+      price: v.price,
+      compare_at_price: v.compare_at_price,
+      sku: v.sku,
+      inventory_quantity: v.inventory_quantity,
+    })),
+  }))
+
+  return { products, total: products.length, shop }
+}
+
+async function handleGetOrders(args: any) {
+  const { token, shop } = await getShopifyToken()
+  const { days = '7', status = 'any', limit = '50' } = args
+
+  const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000).toISOString()
+
+  const data = await shopifyFetch(token, shop, 'orders.json', {
+    status,
+    created_at_min: since,
+    limit,
+    fields: 'id,name,created_at,total_price,subtotal_price,financial_status,line_items,source_name',
+  })
+
+  const orders = (data.orders || []).map((o: any) => ({
+    id: o.name,
+    date: o.created_at?.slice(0, 10),
+    total: parseFloat(o.total_price || '0'),
+    subtotal: parseFloat(o.subtotal_price || '0'),
+    status: o.financial_status,
+    source: o.source_name,
+    items: (o.line_items || []).map((li: any) => ({
+      title: li.title,
+      quantity: li.quantity,
+      price: li.price,
+    })),
+  }))
+
+  const paidOrders = orders.filter((o: any) => ['paid', 'partially_paid'].includes(o.status))
+  const totalRevenue = paidOrders.reduce((sum: number, o: any) => sum + o.total, 0)
+
+  return {
+    orders,
+    total: orders.length,
+    summary: {
+      total_orders: orders.length,
+      paid_orders: paidOrders.length,
+      total_revenue: +totalRevenue.toFixed(2),
+      avg_order_value: paidOrders.length > 0 ? +(totalRevenue / paidOrders.length).toFixed(2) : 0,
+      period_days: days,
+    },
+    shop,
+  }
+}
+
+async function handleGetCollections() {
+  const { token, shop } = await getShopifyToken()
+
+  const data = await shopifyFetch(token, shop, 'custom_collections.json', {
+    limit: '100',
+    fields: 'id,title,body_html,products_count,published_at',
+  })
+
+  const collections = (data.custom_collections || []).map((c: any) => ({
+    id: c.id,
+    title: c.title,
+    products_count: c.products_count,
+    published: !!c.published_at,
+  }))
+
+  return { collections, total: collections.length, shop }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 function extractPurchases(actions: any[]): number {
   if (!actions) return 0
@@ -349,7 +521,7 @@ async function handleMcpMessage(msg: any) {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
         serverInfo: {
-          name: 'tribuanalyzer-meta-ads',
+          name: 'tribuanalyzer-pro',
           version: '1.0.0',
         },
       })
@@ -366,53 +538,52 @@ async function handleMcpMessage(msg: any) {
     case 'tools/call': {
       const toolName = params?.name
       const args = params?.arguments || {}
-
-      // Try Supabase session first, fall back to META_ACCESS_TOKEN env var
-      let accessToken: string | null = null
-
-      try {
-        const supabase = await createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const { data: connection } = await supabase
-            .from('meta_connections')
-            .select('access_token')
-            .eq('user_id', user.id)
-            .single()
-          if (connection?.access_token) {
-            accessToken = connection.access_token.trim()
-          }
-        }
-      } catch { /* no browser session available */ }
-
-      if (!accessToken) {
-        accessToken = process.env.META_ACCESS_TOKEN?.trim() || null
-      }
-
-      if (!accessToken) {
-        return jsonrpcError(id, -32000, 'No Meta token: no Supabase session and META_ACCESS_TOKEN not set')
-      }
+      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads'].includes(toolName)
 
       try {
         let result: any
-        switch (toolName) {
-          case 'get_ad_accounts':
-            result = await handleGetAdAccounts(accessToken)
-            break
-          case 'get_campaigns':
-            result = await handleGetCampaigns(accessToken, args)
-            break
-          case 'get_campaign_insights':
-            result = await handleGetCampaignInsights(accessToken, args)
-            break
-          case 'get_adsets':
-            result = await handleGetAdsets(accessToken, args)
-            break
-          case 'get_ads':
-            result = await handleGetAds(accessToken, args)
-            break
-          default:
-            return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
+
+        if (isMetaTool) {
+          // Get Meta token: Supabase session first, fallback to env var
+          let accessToken: string | null = null
+          try {
+            const supabase = await createClient()
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+              const { data: connection } = await supabase
+                .from('meta_connections')
+                .select('access_token')
+                .eq('user_id', user.id)
+                .single()
+              if (connection?.access_token) {
+                accessToken = connection.access_token.trim()
+              }
+            }
+          } catch { /* no browser session available */ }
+
+          if (!accessToken) {
+            accessToken = process.env.META_ACCESS_TOKEN?.trim() || null
+          }
+          if (!accessToken) {
+            return jsonrpcError(id, -32000, 'No Meta token: no Supabase session and META_ACCESS_TOKEN not set')
+          }
+
+          switch (toolName) {
+            case 'get_ad_accounts': result = await handleGetAdAccounts(accessToken); break
+            case 'get_campaigns': result = await handleGetCampaigns(accessToken, args); break
+            case 'get_campaign_insights': result = await handleGetCampaignInsights(accessToken, args); break
+            case 'get_adsets': result = await handleGetAdsets(accessToken, args); break
+            case 'get_ads': result = await handleGetAds(accessToken, args); break
+          }
+        } else {
+          // Shopify tools (get their own token via client_credentials)
+          switch (toolName) {
+            case 'get_products': result = await handleGetProducts(args); break
+            case 'get_orders': result = await handleGetOrders(args); break
+            case 'get_collections': result = await handleGetCollections(); break
+            default:
+              return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
+          }
         }
 
         return jsonrpc(id, {
