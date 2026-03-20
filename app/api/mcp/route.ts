@@ -15,12 +15,6 @@ function corsJson(body: any, status = 200) {
   return NextResponse.json(body, { status, headers: CORS_HEADERS })
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────
-function authenticate(request: NextRequest): boolean {
-  const secret = request.headers.get('x-mcp-secret') || request.headers.get('authorization')?.replace('Bearer ', '')
-  return secret === process.env.MCP_SECRET
-}
-
 // ── Meta API helper ───────────────────────────────────────────────────
 async function metaFetch(token: string, path: string, params: Record<string, string> = {}) {
   const url = new URL(`${BASE_URL}/${path}`)
@@ -443,13 +437,6 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!authenticate(request)) {
-    return corsJson(
-      jsonrpcError(null, -32000, 'Unauthorized: invalid or missing MCP_SECRET'),
-      401
-    )
-  }
-
   try {
     const body = await request.json()
 
@@ -472,11 +459,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  if (!authenticate(request)) {
-    return corsJson({ error: 'Unauthorized' }, 401)
-  }
-
+export async function GET(_request: NextRequest) {
   return corsJson({
     name: 'tribuanalyzer-meta-ads',
     version: '1.0.0',
