@@ -57,6 +57,16 @@ async function metaPost(token: string, path: string, body: Record<string, any> =
   return data
 }
 
+// ── Meta API DELETE helper ────────────────────────────────────────────
+async function metaDelete(token: string, path: string) {
+  const url = new URL(`${BASE_URL}/${path}`)
+  url.searchParams.set('access_token', token)
+  const res = await fetch(url.toString(), { method: 'DELETE', signal: AbortSignal.timeout(15000) })
+  const data = await res.json()
+  if (data.error) throw new Error(`Meta API: ${data.error.message} (code ${data.error.code})`)
+  return data
+}
+
 // ── Shopify API helper ────────────────────────────────────────────────
 const SHOPIFY_API_VERSION = '2024-10'
 
@@ -242,6 +252,409 @@ const TOOLS = [
       },
       required: ['campaign_id'],
     },
+  },
+  // ── Meta Ads read (detail) tools ──
+  {
+    name: 'get_account_info',
+    description: 'Get detailed info for an ad account: name, status, currency, timezone, balance, spend cap, business info.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_account_pages',
+    description: 'Get Facebook Pages available for the ad account to use in ads.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_instagram_accounts',
+    description: 'Get Instagram accounts linked to the ad account.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_pixels',
+    description: 'Get Meta Pixels for the ad account.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_custom_audiences',
+    description: 'Get custom audiences for the ad account.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' }, limit: { type: 'string', default: '50' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_campaign_details',
+    description: 'Get full details for a single campaign by ID.',
+    inputSchema: { type: 'object' as const, properties: { campaign_id: { type: 'string', description: 'Campaign ID' } }, required: ['campaign_id'] },
+  },
+  {
+    name: 'get_adset_details',
+    description: 'Get full details for a single ad set by ID, including targeting and promoted object.',
+    inputSchema: { type: 'object' as const, properties: { adset_id: { type: 'string', description: 'Ad set ID' } }, required: ['adset_id'] },
+  },
+  {
+    name: 'get_ad_details',
+    description: 'Get full details for a single ad by ID, including creative and tracking specs.',
+    inputSchema: { type: 'object' as const, properties: { ad_id: { type: 'string', description: 'Ad ID' } }, required: ['ad_id'] },
+  },
+  {
+    name: 'get_ad_creatives',
+    description: 'Get ad creatives for an ad account.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' }, limit: { type: 'string', default: '50' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_creative_details',
+    description: 'Get full details for a single ad creative by ID.',
+    inputSchema: { type: 'object' as const, properties: { creative_id: { type: 'string', description: 'Creative ID' } }, required: ['creative_id'] },
+  },
+  {
+    name: 'get_ad_image',
+    description: 'Get ad images for an ad account. Optionally filter by hashes.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' }, hashes: { type: 'array', items: { type: 'string' }, description: 'Filter by image hashes' } }, required: ['account_id'] },
+  },
+  {
+    name: 'get_ad_video',
+    description: 'Get details for a specific ad video by ID.',
+    inputSchema: { type: 'object' as const, properties: { video_id: { type: 'string', description: 'Video ID' } }, required: ['video_id'] },
+  },
+  {
+    name: 'get_insights',
+    description: 'Get performance insights for any object (campaign, adset, ad, or account). More flexible than get_campaign_insights.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        object_id: { type: 'string', description: 'Any Meta object ID (campaign, adset, ad, or act_xxx)' },
+        fields: { type: 'string', description: 'Comma-separated fields (default: spend,impressions,clicks,ctr,cpc,cpm,actions,action_values)' },
+        date_preset: { type: 'string', default: 'last_7d' },
+        time_increment: { type: 'string', description: '"1" for daily, "monthly", or omit for aggregate' },
+        breakdowns: { type: 'string', description: 'e.g. age, gender, country, publisher_platform' },
+        level: { type: 'string', description: 'Aggregation level: ad, adset, campaign, account' },
+      },
+      required: ['object_id'],
+    },
+  },
+  {
+    name: 'get_lead_gen_forms',
+    description: 'Get lead gen forms for a Facebook Page.',
+    inputSchema: { type: 'object' as const, properties: { page_id: { type: 'string', description: 'Facebook Page ID' } }, required: ['page_id'] },
+  },
+  {
+    name: 'list_catalogs',
+    description: 'List product catalogs for a business.',
+    inputSchema: { type: 'object' as const, properties: { business_id: { type: 'string', description: 'Business ID' } }, required: ['business_id'] },
+  },
+  {
+    name: 'list_product_sets',
+    description: 'List product sets within a catalog.',
+    inputSchema: { type: 'object' as const, properties: { catalog_id: { type: 'string', description: 'Product catalog ID' } }, required: ['catalog_id'] },
+  },
+  {
+    name: 'list_email_reports',
+    description: 'List async ad report runs for an ad account.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' } }, required: ['account_id'] },
+  },
+  // ── Meta Ads search/research tools ──
+  {
+    name: 'search_interests',
+    description: 'Search for ad targeting interests by keyword.',
+    inputSchema: { type: 'object' as const, properties: { q: { type: 'string', description: 'Search query (e.g. "yoga", "fitness")' } }, required: ['q'] },
+  },
+  {
+    name: 'get_interest_suggestions',
+    description: 'Get suggested interests based on an existing interest.',
+    inputSchema: { type: 'object' as const, properties: { interest_list: { type: 'array', items: { type: 'string' }, description: 'List of interest names to get suggestions for' } }, required: ['interest_list'] },
+  },
+  {
+    name: 'search_behaviors',
+    description: 'List available behavior targeting categories.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'search_demographics',
+    description: 'List available demographic targeting categories.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'search_geo_locations',
+    description: 'Search for geographic locations for ad targeting.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        q: { type: 'string', description: 'Search query (e.g. "Costa Rica", "San José")' },
+        location_types: { type: 'array', items: { type: 'string' }, description: 'e.g. ["country","region","city","zip","geo_market"]' },
+      },
+      required: ['q'],
+    },
+  },
+  {
+    name: 'search_pages_by_name',
+    description: 'Search for Facebook Pages by name.',
+    inputSchema: { type: 'object' as const, properties: { q: { type: 'string', description: 'Page name to search' } }, required: ['q'] },
+  },
+  {
+    name: 'estimate_audience_size',
+    description: 'Estimate the audience size for a targeting spec.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (act_xxx)' },
+        targeting_spec: { type: 'object', description: 'Targeting spec object (same format as adset targeting)' },
+        optimization_goal: { type: 'string', description: 'e.g. OFFSITE_CONVERSIONS, LINK_CLICKS' },
+      },
+      required: ['account_id', 'targeting_spec'],
+    },
+  },
+  {
+    name: 'search',
+    description: 'Generic Meta API search. Use type parameter to search different entities.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', description: 'Search type: adinterest, adinterestsuggestion, adgeolocation, adTargetingCategory, adlocale' },
+        q: { type: 'string', description: 'Search query' },
+        class: { type: 'string', description: 'For adTargetingCategory: behaviors, demographics, life_events, etc.' },
+      },
+      required: ['type'],
+    },
+  },
+  {
+    name: 'fetch',
+    description: 'Generic Meta Graph API fetch. Fetch any endpoint with custom fields and params.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API path (e.g. "me/adaccounts", "123456/insights", "act_xxx/campaigns")' },
+        params: { type: 'object', description: 'Query parameters as key-value pairs (e.g. { fields: "id,name", limit: "10" })' },
+      },
+      required: ['path'],
+    },
+  },
+  // ── Meta Ads write tools (additional) ──
+  {
+    name: 'create_ad_creative',
+    description: 'Create an ad creative with object_story_spec (single image/video). Returns creative ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (act_xxx)' },
+        name: { type: 'string', description: 'Creative name' },
+        object_story_spec: { type: 'object', description: 'Story spec: { page_id, link_data: { link, message, image_hash, call_to_action } }' },
+        url_tags: { type: 'string', description: 'URL tags for tracking (e.g. utm_source=facebook&utm_medium=cpc)' },
+      },
+      required: ['account_id', 'name', 'object_story_spec'],
+    },
+  },
+  {
+    name: 'create_carousel_ad_creative',
+    description: 'Create a carousel ad creative with multiple cards via asset_feed_spec or object_story_spec with child_attachments.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (act_xxx)' },
+        name: { type: 'string', description: 'Creative name' },
+        object_story_spec: { type: 'object', description: 'Story spec with child_attachments for carousel' },
+      },
+      required: ['account_id', 'name', 'object_story_spec'],
+    },
+  },
+  {
+    name: 'update_ad',
+    description: 'Update an existing ad. Can change name, status, creative, or tracking_specs.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ad_id: { type: 'string', description: 'Ad ID to update' },
+        name: { type: 'string' }, status: { type: 'string' },
+        creative: { type: 'object', description: '{ creative_id: "xxx" }' },
+        tracking_specs: { type: 'array' },
+      },
+      required: ['ad_id'],
+    },
+  },
+  {
+    name: 'update_ad_creative',
+    description: 'Update an existing ad creative.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        creative_id: { type: 'string', description: 'Creative ID to update' },
+        name: { type: 'string' }, url_tags: { type: 'string' },
+        object_story_spec: { type: 'object' },
+      },
+      required: ['creative_id'],
+    },
+  },
+  {
+    name: 'update_email_report',
+    description: 'Update an async ad report run.',
+    inputSchema: { type: 'object' as const, properties: { report_id: { type: 'string' }, is_bookmarked: { type: 'boolean' } }, required: ['report_id'] },
+  },
+  {
+    name: 'update_lead_gen_form_status',
+    description: 'Update the status of a lead gen form (activate/archive).',
+    inputSchema: { type: 'object' as const, properties: { form_id: { type: 'string' }, status: { type: 'string', description: 'ACTIVE, ARCHIVED, or DRAFT' } }, required: ['form_id', 'status'] },
+  },
+  {
+    name: 'duplicate_campaign',
+    description: 'Duplicate an existing campaign.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { campaign_id: { type: 'string' }, deep_copy: { type: 'boolean', description: 'Also duplicate child ad sets and ads (default true)' }, rename_options: { type: 'object', description: '{ rename_suffix: " - Copy" }' } },
+      required: ['campaign_id'],
+    },
+  },
+  {
+    name: 'duplicate_adset',
+    description: 'Duplicate an existing ad set.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { adset_id: { type: 'string' }, deep_copy: { type: 'boolean', description: 'Also duplicate child ads (default true)' }, campaign_id: { type: 'string', description: 'Target campaign (default same campaign)' }, rename_options: { type: 'object' } },
+      required: ['adset_id'],
+    },
+  },
+  {
+    name: 'duplicate_ad',
+    description: 'Duplicate an existing ad.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ad_id: { type: 'string' }, adset_id: { type: 'string', description: 'Target ad set (default same ad set)' }, rename_options: { type: 'object' } },
+      required: ['ad_id'],
+    },
+  },
+  {
+    name: 'duplicate_creative',
+    description: 'Duplicate an existing ad creative under the same account.',
+    inputSchema: { type: 'object' as const, properties: { creative_id: { type: 'string' }, account_id: { type: 'string', description: 'Ad account for the new creative' } }, required: ['creative_id', 'account_id'] },
+  },
+  {
+    name: 'upload_ad_image',
+    description: 'Upload an image to the ad account from a URL. Returns the image hash for use in creatives.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' }, url: { type: 'string', description: 'Public URL of the image' }, name: { type: 'string', description: 'Image name' } },
+      required: ['account_id', 'url'],
+    },
+  },
+  {
+    name: 'upload_ad_video',
+    description: 'Upload a video to the ad account from a URL. Returns the video ID for use in creatives.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_id: { type: 'string', description: 'Ad account ID (act_xxx)' }, file_url: { type: 'string', description: 'Public URL of the video' }, title: { type: 'string' }, description: { type: 'string' } },
+      required: ['account_id', 'file_url'],
+    },
+  },
+  {
+    name: 'create_budget_schedule',
+    description: 'Create a high-demand period budget schedule for a campaign (budget scheduling).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        campaign_id: { type: 'string' },
+        high_demand_periods: { type: 'array', description: 'Array of { budget_value, budget_value_type, time_start, time_end }' },
+      },
+      required: ['campaign_id', 'high_demand_periods'],
+    },
+  },
+  {
+    name: 'create_email_report',
+    description: 'Create an async ad report run for an ad account.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (act_xxx)' },
+        fields: { type: 'string', description: 'Comma-separated insight fields' },
+        date_preset: { type: 'string', default: 'last_7d' },
+        level: { type: 'string', description: 'ad, adset, campaign, or account' },
+        breakdowns: { type: 'string' },
+      },
+      required: ['account_id', 'fields'],
+    },
+  },
+  {
+    name: 'delete_email_report',
+    description: 'Delete an async ad report run.',
+    inputSchema: { type: 'object' as const, properties: { report_id: { type: 'string' } }, required: ['report_id'] },
+  },
+  {
+    name: 'create_lead_gen_form',
+    description: 'Create a lead gen form on a Facebook Page.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        page_id: { type: 'string', description: 'Facebook Page ID' },
+        name: { type: 'string' },
+        questions: { type: 'array', description: 'Array of { type, key, label } question objects' },
+        privacy_policy: { type: 'object', description: '{ url: "https://..." }' },
+        follow_up_action_url: { type: 'string' },
+      },
+      required: ['page_id', 'name', 'questions', 'privacy_policy'],
+    },
+  },
+  {
+    name: 'publish_lead_gen_draft_form',
+    description: 'Publish a draft lead gen form (change status to ACTIVE).',
+    inputSchema: { type: 'object' as const, properties: { form_id: { type: 'string' } }, required: ['form_id'] },
+  },
+  {
+    name: 'submit_feedback',
+    description: 'Submit feedback about tool results or suggestions.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { feedback: { type: 'string', description: 'Feedback text' }, tool_name: { type: 'string' }, rating: { type: 'number', description: '1-5' } },
+      required: ['feedback'],
+    },
+  },
+  // ── Meta Ads bulk tools ──
+  {
+    name: 'bulk_get_insights',
+    description: 'Get insights for multiple objects at once. Returns an array of results.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        object_ids: { type: 'array', items: { type: 'string' }, description: 'Array of object IDs' },
+        fields: { type: 'string', default: 'spend,impressions,clicks,ctr,cpc,actions,action_values' },
+        date_preset: { type: 'string', default: 'last_7d' },
+      },
+      required: ['object_ids'],
+    },
+  },
+  {
+    name: 'bulk_get_ad_creatives',
+    description: 'Get details for multiple ad creatives at once.',
+    inputSchema: { type: 'object' as const, properties: { creative_ids: { type: 'array', items: { type: 'string' } } }, required: ['creative_ids'] },
+  },
+  {
+    name: 'bulk_search_interests',
+    description: 'Search for multiple interest keywords at once.',
+    inputSchema: { type: 'object' as const, properties: { queries: { type: 'array', items: { type: 'string' }, description: 'Array of search queries' } }, required: ['queries'] },
+  },
+  {
+    name: 'bulk_update_campaigns',
+    description: 'Update multiple campaigns at once. Each item should have campaign_id and fields to update.',
+    inputSchema: { type: 'object' as const, properties: { updates: { type: 'array', items: { type: 'object' }, description: 'Array of { campaign_id, name?, daily_budget?, status? }' } }, required: ['updates'] },
+  },
+  {
+    name: 'bulk_update_adsets',
+    description: 'Update multiple ad sets at once.',
+    inputSchema: { type: 'object' as const, properties: { updates: { type: 'array', items: { type: 'object' }, description: 'Array of { adset_id, name?, daily_budget?, status? }' } }, required: ['updates'] },
+  },
+  {
+    name: 'bulk_update_ads',
+    description: 'Update multiple ads at once.',
+    inputSchema: { type: 'object' as const, properties: { updates: { type: 'array', items: { type: 'object' }, description: 'Array of { ad_id, name?, status?, creative? }' } }, required: ['updates'] },
+  },
+  {
+    name: 'bulk_create_ad_creatives',
+    description: 'Create multiple ad creatives at once.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string' }, creatives: { type: 'array', items: { type: 'object' }, description: 'Array of { name, object_story_spec, url_tags? }' } }, required: ['account_id', 'creatives'] },
+  },
+  {
+    name: 'bulk_upload_ad_images',
+    description: 'Upload multiple images from URLs at once.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string' }, images: { type: 'array', items: { type: 'object' }, description: 'Array of { url, name? }' } }, required: ['account_id', 'images'] },
+  },
+  {
+    name: 'bulk_upload_ad_videos',
+    description: 'Upload multiple videos from URLs at once.',
+    inputSchema: { type: 'object' as const, properties: { account_id: { type: 'string' }, videos: { type: 'array', items: { type: 'object' }, description: 'Array of { file_url, title?, description? }' } }, required: ['account_id', 'videos'] },
   },
   // ── Shopify tools ──
   {
@@ -569,6 +982,360 @@ async function handleUpdateCampaign(token: string, args: any) {
   return { success: true, campaign_id, updated_fields: Object.keys(body), message: `Campaign ${campaign_id} updated successfully` }
 }
 
+// ── Meta Ads read (detail) handlers ──────────────────────────────────
+async function handleGetAccountInfo(token: string, args: any) {
+  const data = await metaFetch(token, args.account_id, { fields: 'id,name,account_status,currency,timezone_name,balance,amount_spent,spend_cap,business_name,business,min_daily_budget,funding_source_details' })
+  return data
+}
+
+async function handleGetAccountPages(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/promote_pages`, { fields: 'id,name,link,picture,fan_count,verification_status', limit: '100' })
+  return { pages: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetInstagramAccounts(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/instagram_accounts`, { fields: 'id,username,profile_pic,followers_count,media_count' })
+  return { instagram_accounts: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetPixels(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/adspixels`, { fields: 'id,name,last_fired_time,creation_time,is_unavailable' })
+  return { pixels: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetCustomAudiences(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/customaudiences`, { fields: 'id,name,approximate_count,subtype,description,time_created', limit: args.limit || '50' })
+  return { audiences: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetCampaignDetails(token: string, args: any) {
+  return metaFetch(token, args.campaign_id, { fields: 'id,name,status,objective,daily_budget,lifetime_budget,bid_strategy,buying_type,special_ad_categories,created_time,start_time,stop_time,budget_remaining' })
+}
+
+async function handleGetAdsetDetails(token: string, args: any) {
+  return metaFetch(token, args.adset_id, { fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event,targeting,promoted_object,bid_amount,bid_strategy,created_time,start_time,end_time,budget_remaining' })
+}
+
+async function handleGetAdDetails(token: string, args: any) {
+  return metaFetch(token, args.ad_id, { fields: 'id,name,status,adset_id,campaign_id,creative{id,name,thumbnail_url,object_story_spec,url_tags},tracking_specs,conversion_specs,created_time' })
+}
+
+async function handleGetAdCreatives(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/adcreatives`, { fields: 'id,name,title,body,image_url,thumbnail_url,object_story_spec,url_tags,status', limit: args.limit || '50' })
+  return { creatives: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetCreativeDetails(token: string, args: any) {
+  return metaFetch(token, args.creative_id, { fields: 'id,name,title,body,image_url,thumbnail_url,object_story_spec,asset_feed_spec,url_tags,effective_object_story_id' })
+}
+
+async function handleGetAdImage(token: string, args: any) {
+  const params: Record<string, string> = { fields: 'hash,name,url,url_128,width,height,created_time' }
+  if (args.hashes?.length) params.hashes = JSON.stringify(args.hashes)
+  const data = await metaFetch(token, `${args.account_id}/adimages`, params)
+  return { images: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetAdVideo(token: string, args: any) {
+  return metaFetch(token, args.video_id, { fields: 'id,title,source,picture,length,created_time,updated_time' })
+}
+
+async function handleGetInsights(token: string, args: any) {
+  const params: Record<string, string> = {
+    fields: args.fields || 'spend,impressions,clicks,ctr,cpc,cpm,actions,action_values',
+    date_preset: args.date_preset || 'last_7d',
+  }
+  if (args.time_increment) params.time_increment = args.time_increment
+  if (args.breakdowns) params.breakdowns = args.breakdowns
+  if (args.level) params.level = args.level
+  const data = await metaFetch(token, `${args.object_id}/insights`, params)
+  return { insights: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetLeadGenForms(token: string, args: any) {
+  const data = await metaFetch(token, `${args.page_id}/leadgen_forms`, { fields: 'id,name,status,leads_count,created_time,expired_leads_count' })
+  return { forms: data.data || [], total: (data.data || []).length }
+}
+
+async function handleListCatalogs(token: string, args: any) {
+  const data = await metaFetch(token, `${args.business_id}/owned_product_catalogs`, { fields: 'id,name,product_count,vertical' })
+  return { catalogs: data.data || [], total: (data.data || []).length }
+}
+
+async function handleListProductSets(token: string, args: any) {
+  const data = await metaFetch(token, `${args.catalog_id}/product_sets`, { fields: 'id,name,filter,product_count' })
+  return { product_sets: data.data || [], total: (data.data || []).length }
+}
+
+async function handleListEmailReports(token: string, args: any) {
+  const data = await metaFetch(token, `${args.account_id}/adreportruns`, { fields: 'id,async_status,async_percent_completion,date_start,date_stop,time_completed', limit: '50' })
+  return { reports: data.data || [], total: (data.data || []).length }
+}
+
+// ── Meta Ads search/research handlers ────────────────────────────────
+async function handleSearchInterests(token: string, args: any) {
+  const data = await metaFetch(token, 'search', { type: 'adinterest', q: args.q })
+  return { interests: data.data || [], total: (data.data || []).length }
+}
+
+async function handleGetInterestSuggestions(token: string, args: any) {
+  const data = await metaFetch(token, 'search', { type: 'adinterestsuggestion', interest_list: JSON.stringify(args.interest_list) })
+  return { suggestions: data.data || [], total: (data.data || []).length }
+}
+
+async function handleSearchBehaviors(token: string) {
+  const data = await metaFetch(token, 'search', { type: 'adTargetingCategory', class: 'behaviors' })
+  return { behaviors: data.data || [], total: (data.data || []).length }
+}
+
+async function handleSearchDemographics(token: string) {
+  const data = await metaFetch(token, 'search', { type: 'adTargetingCategory', class: 'demographics' })
+  return { demographics: data.data || [], total: (data.data || []).length }
+}
+
+async function handleSearchGeoLocations(token: string, args: any) {
+  const params: Record<string, string> = { type: 'adgeolocation', q: args.q }
+  if (args.location_types) params.location_types = JSON.stringify(args.location_types)
+  const data = await metaFetch(token, 'search', params)
+  return { locations: data.data || [], total: (data.data || []).length }
+}
+
+async function handleSearchPagesByName(token: string, args: any) {
+  const data = await metaFetch(token, 'pages/search', { q: args.q, fields: 'id,name,link,fan_count,verification_status,picture' })
+  return { pages: data.data || [], total: (data.data || []).length }
+}
+
+async function handleEstimateAudienceSize(token: string, args: any) {
+  const body: Record<string, any> = { targeting_spec: args.targeting_spec }
+  if (args.optimization_goal) body.optimization_goal = args.optimization_goal
+  return metaPost(token, `${args.account_id}/delivery_estimate`, body)
+}
+
+async function handleSearch(token: string, args: any) {
+  const params: Record<string, string> = { type: args.type }
+  if (args.q) params.q = args.q
+  if (args.class) params.class = args.class
+  const data = await metaFetch(token, 'search', params)
+  return { data: data.data || [], total: (data.data || []).length }
+}
+
+async function handleFetch(token: string, args: any) {
+  const params: Record<string, string> = {}
+  if (args.params) {
+    for (const [k, v] of Object.entries(args.params)) {
+      params[k] = String(v)
+    }
+  }
+  return metaFetch(token, args.path, params)
+}
+
+// ── Meta Ads additional write handlers ───────────────────────────────
+async function handleCreateAdCreative(token: string, args: any) {
+  const body: Record<string, any> = { name: args.name, object_story_spec: args.object_story_spec }
+  if (args.url_tags) body.url_tags = args.url_tags
+  const data = await metaPost(token, `${args.account_id}/adcreatives`, body)
+  return { success: true, creative_id: data.id, message: `Creative "${args.name}" created` }
+}
+
+async function handleCreateCarouselAdCreative(token: string, args: any) {
+  const body: Record<string, any> = { name: args.name, object_story_spec: args.object_story_spec }
+  const data = await metaPost(token, `${args.account_id}/adcreatives`, body)
+  return { success: true, creative_id: data.id, message: `Carousel creative "${args.name}" created` }
+}
+
+async function handleUpdateAd(token: string, args: any) {
+  const { ad_id, ...fields } = args
+  const body: Record<string, any> = {}
+  if (fields.name !== undefined) body.name = fields.name
+  if (fields.status !== undefined) body.status = fields.status
+  if (fields.creative !== undefined) body.creative = fields.creative
+  if (fields.tracking_specs !== undefined) body.tracking_specs = fields.tracking_specs
+  if (Object.keys(body).length === 0) return { success: false, message: 'No fields to update' }
+  await metaPost(token, ad_id, body)
+  return { success: true, ad_id, updated_fields: Object.keys(body) }
+}
+
+async function handleUpdateAdCreative(token: string, args: any) {
+  const { creative_id, ...fields } = args
+  const body: Record<string, any> = {}
+  if (fields.name !== undefined) body.name = fields.name
+  if (fields.url_tags !== undefined) body.url_tags = fields.url_tags
+  if (fields.object_story_spec !== undefined) body.object_story_spec = fields.object_story_spec
+  if (Object.keys(body).length === 0) return { success: false, message: 'No fields to update' }
+  await metaPost(token, creative_id, body)
+  return { success: true, creative_id, updated_fields: Object.keys(body) }
+}
+
+async function handleUpdateEmailReport(token: string, args: any) {
+  const body: Record<string, any> = {}
+  if (args.is_bookmarked !== undefined) body.is_bookmarked = args.is_bookmarked
+  await metaPost(token, args.report_id, body)
+  return { success: true, report_id: args.report_id }
+}
+
+async function handleUpdateLeadGenFormStatus(token: string, args: any) {
+  await metaPost(token, args.form_id, { status: args.status })
+  return { success: true, form_id: args.form_id, status: args.status }
+}
+
+async function handleDuplicateCampaign(token: string, args: any) {
+  const body: Record<string, any> = { deep_copy: args.deep_copy !== false }
+  if (args.rename_options) body.rename_options = args.rename_options
+  const data = await metaPost(token, `${args.campaign_id}/copies`, body)
+  return { success: true, new_campaign_id: data.copied_campaign_id || data.id, original: args.campaign_id }
+}
+
+async function handleDuplicateAdset(token: string, args: any) {
+  const body: Record<string, any> = { deep_copy: args.deep_copy !== false }
+  if (args.campaign_id) body.campaign_id = args.campaign_id
+  if (args.rename_options) body.rename_options = args.rename_options
+  const data = await metaPost(token, `${args.adset_id}/copies`, body)
+  return { success: true, new_adset_id: data.copied_adset_id || data.id, original: args.adset_id }
+}
+
+async function handleDuplicateAd(token: string, args: any) {
+  const body: Record<string, any> = {}
+  if (args.adset_id) body.adset_id = args.adset_id
+  if (args.rename_options) body.rename_options = args.rename_options
+  const data = await metaPost(token, `${args.ad_id}/copies`, body)
+  return { success: true, new_ad_id: data.copied_ad_id || data.id, original: args.ad_id }
+}
+
+async function handleDuplicateCreative(token: string, args: any) {
+  const original = await metaFetch(token, args.creative_id, { fields: 'name,object_story_spec,url_tags' })
+  const body: Record<string, any> = { name: `${original.name} - Copy`, object_story_spec: original.object_story_spec }
+  if (original.url_tags) body.url_tags = original.url_tags
+  const data = await metaPost(token, `${args.account_id}/adcreatives`, body)
+  return { success: true, new_creative_id: data.id, original: args.creative_id }
+}
+
+async function handleUploadAdImage(token: string, args: any) {
+  const body: Record<string, any> = { url: args.url }
+  if (args.name) body.name = args.name
+  const data = await metaPost(token, `${args.account_id}/adimages`, body)
+  const images = data.images || {}
+  const first = Object.values(images)[0] as any
+  return { success: true, hash: first?.hash, url: first?.url, name: first?.name }
+}
+
+async function handleUploadAdVideo(token: string, args: any) {
+  const body: Record<string, any> = { file_url: args.file_url }
+  if (args.title) body.title = args.title
+  if (args.description) body.description = args.description
+  const data = await metaPost(token, `${args.account_id}/advideos`, body)
+  return { success: true, video_id: data.id }
+}
+
+async function handleCreateBudgetSchedule(token: string, args: any) {
+  return metaPost(token, `${args.campaign_id}/budget_schedules`, { high_demand_periods: args.high_demand_periods })
+}
+
+async function handleCreateEmailReport(token: string, args: any) {
+  const body: Record<string, any> = { fields: args.fields, date_preset: args.date_preset || 'last_7d' }
+  if (args.level) body.level = args.level
+  if (args.breakdowns) body.breakdowns = args.breakdowns
+  const data = await metaPost(token, `${args.account_id}/adreportrun`, body)
+  return { success: true, report_run_id: data.report_run_id || data.id }
+}
+
+async function handleDeleteEmailReport(token: string, args: any) {
+  await metaDelete(token, args.report_id)
+  return { success: true, deleted: args.report_id }
+}
+
+async function handleCreateLeadGenForm(token: string, args: any) {
+  const body: Record<string, any> = { name: args.name, questions: args.questions, privacy_policy: args.privacy_policy }
+  if (args.follow_up_action_url) body.follow_up_action_url = args.follow_up_action_url
+  const data = await metaPost(token, `${args.page_id}/leadgen_forms`, body)
+  return { success: true, form_id: data.id }
+}
+
+async function handlePublishLeadGenDraftForm(token: string, args: any) {
+  await metaPost(token, args.form_id, { status: 'ACTIVE' })
+  return { success: true, form_id: args.form_id, status: 'ACTIVE' }
+}
+
+async function handleSubmitFeedback(_token: string, args: any) {
+  return { success: true, message: 'Feedback received', feedback: args.feedback, tool_name: args.tool_name || null, rating: args.rating || null }
+}
+
+// ── Meta Ads bulk handlers ───────────────────────────────────────────
+async function handleBulkGetInsights(token: string, args: any) {
+  const results = await Promise.all((args.object_ids || []).map(async (id: string) => {
+    try {
+      const r = await handleGetInsights(token, { object_id: id, fields: args.fields, date_preset: args.date_preset })
+      return { object_id: id, ...r }
+    } catch (e: any) { return { object_id: id, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkGetAdCreatives(token: string, args: any) {
+  const results = await Promise.all((args.creative_ids || []).map(async (id: string) => {
+    try { return await handleGetCreativeDetails(token, { creative_id: id }) }
+    catch (e: any) { return { creative_id: id, error: e.message } }
+  }))
+  return { creatives: results, total: results.length }
+}
+
+async function handleBulkSearchInterests(token: string, args: any) {
+  const results = await Promise.all((args.queries || []).map(async (q: string) => {
+    try {
+      const r = await handleSearchInterests(token, { q })
+      return { query: q, ...r }
+    } catch (e: any) { return { query: q, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkUpdateCampaigns(token: string, args: any) {
+  const results = await Promise.all((args.updates || []).map(async (u: any) => {
+    try { return await handleUpdateCampaign(token, u) }
+    catch (e: any) { return { campaign_id: u.campaign_id, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkUpdateAdsets(token: string, args: any) {
+  const results = await Promise.all((args.updates || []).map(async (u: any) => {
+    try { return await handleUpdateAdset(token, u) }
+    catch (e: any) { return { adset_id: u.adset_id, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkUpdateAds(token: string, args: any) {
+  const results = await Promise.all((args.updates || []).map(async (u: any) => {
+    try { return await handleUpdateAd(token, u) }
+    catch (e: any) { return { ad_id: u.ad_id, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkCreateAdCreatives(token: string, args: any) {
+  const results = await Promise.all((args.creatives || []).map(async (c: any) => {
+    try { return await handleCreateAdCreative(token, { account_id: args.account_id, ...c }) }
+    catch (e: any) { return { name: c.name, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkUploadAdImages(token: string, args: any) {
+  const results = await Promise.all((args.images || []).map(async (img: any) => {
+    try { return await handleUploadAdImage(token, { account_id: args.account_id, ...img }) }
+    catch (e: any) { return { url: img.url, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
+async function handleBulkUploadAdVideos(token: string, args: any) {
+  const results = await Promise.all((args.videos || []).map(async (vid: any) => {
+    try { return await handleUploadAdVideo(token, { account_id: args.account_id, ...vid }) }
+    catch (e: any) { return { file_url: vid.file_url, error: e.message } }
+  }))
+  return { results, total: results.length }
+}
+
 // ── Shopify tool implementations ──────────────────────────────────────
 async function handleGetProducts(args: any) {
   const { token, shop } = await getShopifyToken()
@@ -739,12 +1506,84 @@ async function handleMcpMessage(msg: any) {
     case 'tools/call': {
       const toolName = params?.name
       const args = params?.arguments || {}
-      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads', 'create_campaign', 'create_adset', 'create_ad', 'update_adset', 'update_campaign'].includes(toolName)
+
+      // Handler maps for clean routing
+      const META_HANDLERS: Record<string, (t: string, a: any) => Promise<any>> = {
+        get_ad_accounts: handleGetAdAccounts,
+        get_campaigns: handleGetCampaigns,
+        get_campaign_insights: handleGetCampaignInsights,
+        get_adsets: handleGetAdsets,
+        get_ads: handleGetAds,
+        get_account_info: handleGetAccountInfo,
+        get_account_pages: handleGetAccountPages,
+        get_instagram_accounts: handleGetInstagramAccounts,
+        get_pixels: handleGetPixels,
+        get_custom_audiences: handleGetCustomAudiences,
+        get_campaign_details: handleGetCampaignDetails,
+        get_adset_details: handleGetAdsetDetails,
+        get_ad_details: handleGetAdDetails,
+        get_ad_creatives: handleGetAdCreatives,
+        get_creative_details: handleGetCreativeDetails,
+        get_ad_image: handleGetAdImage,
+        get_ad_video: handleGetAdVideo,
+        get_insights: handleGetInsights,
+        get_lead_gen_forms: handleGetLeadGenForms,
+        get_interest_suggestions: handleGetInterestSuggestions,
+        list_catalogs: handleListCatalogs,
+        list_product_sets: handleListProductSets,
+        list_email_reports: handleListEmailReports,
+        search_interests: handleSearchInterests,
+        search_behaviors: (t) => handleSearchBehaviors(t),
+        search_demographics: (t) => handleSearchDemographics(t),
+        search_geo_locations: handleSearchGeoLocations,
+        search_pages_by_name: handleSearchPagesByName,
+        search: handleSearch,
+        fetch: handleFetch,
+        estimate_audience_size: handleEstimateAudienceSize,
+        create_campaign: handleCreateCampaign,
+        create_adset: handleCreateAdset,
+        create_ad: handleCreateAd,
+        create_ad_creative: handleCreateAdCreative,
+        create_carousel_ad_creative: handleCreateCarouselAdCreative,
+        create_budget_schedule: handleCreateBudgetSchedule,
+        create_email_report: handleCreateEmailReport,
+        create_lead_gen_form: handleCreateLeadGenForm,
+        update_campaign: handleUpdateCampaign,
+        update_adset: handleUpdateAdset,
+        update_ad: handleUpdateAd,
+        update_ad_creative: handleUpdateAdCreative,
+        update_email_report: handleUpdateEmailReport,
+        update_lead_gen_form_status: handleUpdateLeadGenFormStatus,
+        duplicate_campaign: handleDuplicateCampaign,
+        duplicate_adset: handleDuplicateAdset,
+        duplicate_ad: handleDuplicateAd,
+        duplicate_creative: handleDuplicateCreative,
+        upload_ad_image: handleUploadAdImage,
+        upload_ad_video: handleUploadAdVideo,
+        delete_email_report: handleDeleteEmailReport,
+        publish_lead_gen_draft_form: handlePublishLeadGenDraftForm,
+        submit_feedback: handleSubmitFeedback,
+        bulk_get_insights: handleBulkGetInsights,
+        bulk_get_ad_creatives: handleBulkGetAdCreatives,
+        bulk_search_interests: handleBulkSearchInterests,
+        bulk_update_campaigns: handleBulkUpdateCampaigns,
+        bulk_update_adsets: handleBulkUpdateAdsets,
+        bulk_update_ads: handleBulkUpdateAds,
+        bulk_create_ad_creatives: handleBulkCreateAdCreatives,
+        bulk_upload_ad_images: handleBulkUploadAdImages,
+        bulk_upload_ad_videos: handleBulkUploadAdVideos,
+      }
+
+      const SHOPIFY_HANDLERS: Record<string, (a: any) => Promise<any>> = {
+        get_products: handleGetProducts,
+        get_orders: handleGetOrders,
+        get_collections: () => handleGetCollections(),
+      }
 
       try {
         let result: any
 
-        if (isMetaTool) {
+        if (toolName in META_HANDLERS) {
           // Get Meta token: Supabase session first, fallback to env var
           let accessToken: string | null = null
           try {
@@ -769,27 +1608,11 @@ async function handleMcpMessage(msg: any) {
             return jsonrpcError(id, -32000, 'No Meta token: no Supabase session and META_ACCESS_TOKEN not set')
           }
 
-          switch (toolName) {
-            case 'get_ad_accounts': result = await handleGetAdAccounts(accessToken); break
-            case 'get_campaigns': result = await handleGetCampaigns(accessToken, args); break
-            case 'get_campaign_insights': result = await handleGetCampaignInsights(accessToken, args); break
-            case 'get_adsets': result = await handleGetAdsets(accessToken, args); break
-            case 'get_ads': result = await handleGetAds(accessToken, args); break
-            case 'create_campaign': result = await handleCreateCampaign(accessToken, args); break
-            case 'create_adset': result = await handleCreateAdset(accessToken, args); break
-            case 'create_ad': result = await handleCreateAd(accessToken, args); break
-            case 'update_adset': result = await handleUpdateAdset(accessToken, args); break
-            case 'update_campaign': result = await handleUpdateCampaign(accessToken, args); break
-          }
+          result = await META_HANDLERS[toolName](accessToken, args)
+        } else if (toolName in SHOPIFY_HANDLERS) {
+          result = await SHOPIFY_HANDLERS[toolName](args)
         } else {
-          // Shopify tools (get their own token via client_credentials)
-          switch (toolName) {
-            case 'get_products': result = await handleGetProducts(args); break
-            case 'get_orders': result = await handleGetOrders(args); break
-            case 'get_collections': result = await handleGetCollections(); break
-            default:
-              return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
-          }
+          return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
         }
 
         return jsonrpc(id, {
