@@ -191,7 +191,7 @@ const TOOLS = [
         bid_strategy: { type: 'string', description: 'e.g. LOWEST_COST_WITHOUT_CAP, LOWEST_COST_WITH_BID_CAP, COST_CAP. Ignored when use_adset_level_budgets is true.' },
         daily_budget: { type: 'number', description: 'Daily budget in cents (e.g. 8000 = $80.00). Ignored when use_adset_level_budgets is true.' },
         use_adset_level_budgets: { type: 'boolean', description: 'If true, budget is set per ad set — no campaign-level budget, bid_strategy, or CBO sent (default false)' },
-        is_adset_budget_sharing_enabled: { type: 'boolean', description: 'When use_adset_level_budgets=true, allow ad sets to share up to 20% of budget for optimization (default true)' },
+        is_adset_budget_sharing_enabled: { type: 'boolean', description: 'When use_adset_level_budgets=true, allow ad sets to share up to 20% budget (default false; true requires bid_strategy)' },
       },
       required: ['account_id', 'name', 'objective'],
     },
@@ -916,7 +916,7 @@ async function handleCreateCampaign(token: string, args: any) {
 
   if (use_adset_level_budgets) {
     // No campaign-level budget — Meta requires explicit sharing flag
-    body.is_adset_budget_sharing_enabled = args.is_adset_budget_sharing_enabled ?? true
+    body.is_adset_budget_sharing_enabled = args.is_adset_budget_sharing_enabled ?? false
   } else {
     if (daily_budget !== undefined) body.daily_budget = daily_budget
     if (bid_strategy !== undefined) body.bid_strategy = bid_strategy
