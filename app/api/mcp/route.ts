@@ -162,6 +162,25 @@ const TOOLS = [
   },
   // ── Meta Ads write tools ──
   {
+    name: 'create_campaign',
+    description: 'Create a campaign in an ad account. Returns the new campaign ID. When use_adset_level_budgets is true, budget is managed per ad set (no campaign-level budget sent).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (e.g. act_1240971087279618)' },
+        name: { type: 'string', description: 'Campaign name' },
+        objective: { type: 'string', description: 'e.g. OUTCOME_SALES, OUTCOME_TRAFFIC, OUTCOME_AWARENESS, OUTCOME_LEADS, OUTCOME_ENGAGEMENT' },
+        status: { type: 'string', description: 'PAUSED or ACTIVE (default PAUSED)' },
+        special_ad_categories: { type: 'array', description: 'e.g. [] or ["HOUSING","CREDIT","EMPLOYMENT"]', items: { type: 'string' } },
+        buying_type: { type: 'string', description: 'AUCTION (default) or RESERVED' },
+        bid_strategy: { type: 'string', description: 'e.g. LOWEST_COST_WITHOUT_CAP, LOWEST_COST_WITH_BID_CAP, COST_CAP. Ignored when use_adset_level_budgets is true.' },
+        daily_budget: { type: 'number', description: 'Daily budget in cents (e.g. 8000 = $80.00). Ignored when use_adset_level_budgets is true.' },
+        use_adset_level_budgets: { type: 'boolean', description: 'If true, budget is set per ad set — no campaign-level budget, bid_strategy, or CBO sent (default false)' },
+      },
+      required: ['account_id', 'name', 'objective'],
+    },
+  },
+  {
     name: 'create_adset',
     description: 'Create an ad set within an existing campaign. Budget is in cents (e.g. 8000 = $80.00). Returns the new ad set ID.',
     inputSchema: {
@@ -458,6 +477,33 @@ async function handleGetAds(token: string, args: any) {
 }
 
 // ── Meta Ads write tool implementations ──────────────────────────────
+async function handleCreateCampaign(token: string, args: any) {
+  const {
+    account_id, name, objective,
+    status = 'PAUSED',
+    special_ad_categories = [],
+    buying_type = 'AUCTION',
+    bid_strategy, daily_budget,
+    use_adset_level_budgets = false,
+  } = args
+
+  const body: Record<string, any> = {
+    name,
+    objective,
+    status,
+    special_ad_categories,
+    buying_type,
+  }
+
+  if (!use_adset_level_budgets) {
+    if (daily_budget !== undefined) body.daily_budget = daily_budget
+    if (bid_strategy !== undefined) body.bid_strategy = bid_strategy
+  }
+
+  const data = await metaPost(token, `${account_id}/campaigns`, body)
+  return { success: true, campaign_id: data.id, message: `Campaign "${name}" created successfully` }
+}
+
 async function handleCreateAdset(token: string, args: any) {
   const { account_id, campaign_id, name, optimization_goal, billing_event, daily_budget, status = 'PAUSED', targeting, promoted_object } = args
 
@@ -693,7 +739,7 @@ async function handleMcpMessage(msg: any) {
     case 'tools/call': {
       const toolName = params?.name
       const args = params?.arguments || {}
-      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads', 'create_adset', 'create_ad', 'update_adset', 'update_campaign'].includes(toolName)
+      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads', 'create_campaign', 'create_adset', 'create_ad', 'update_adset', 'update_campaign'].includes(toolName)
 
       try {
         let result: any
@@ -729,6 +775,7 @@ async function handleMcpMessage(msg: any) {
             case 'get_campaign_insights': result = await handleGetCampaignInsights(accessToken, args); break
             case 'get_adsets': result = await handleGetAdsets(accessToken, args); break
             case 'get_ads': result = await handleGetAds(accessToken, args); break
+            case 'create_campaign': result = await handleCreateCampaign(accessToken, args); break
             case 'create_adset': result = await handleCreateAdset(accessToken, args); break
             case 'create_ad': result = await handleCreateAd(accessToken, args); break
             case 'update_adset': result = await handleUpdateAdset(accessToken, args); break
