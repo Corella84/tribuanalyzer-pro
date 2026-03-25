@@ -211,6 +211,7 @@ const TOOLS = [
         status: { type: 'string', description: 'PAUSED or ACTIVE (default PAUSED)' },
         targeting: { type: 'object', description: 'Targeting spec: { geo_locations: { countries: ["CR"] }, age_min, age_max, targeting_automation, etc. }' },
         promoted_object: { type: 'object', description: 'Promoted object: { pixel_id, custom_event_type } for conversion campaigns' },
+        bid_strategy: { type: 'string', description: 'e.g. LOWEST_COST_WITHOUT_CAP, LOWEST_COST_WITH_BID_CAP, COST_CAP. Required when campaign has no bid_strategy.' },
       },
       required: ['account_id', 'campaign_id', 'name', 'optimization_goal', 'billing_event', 'daily_budget', 'targeting'],
     },
@@ -927,7 +928,7 @@ async function handleCreateCampaign(token: string, args: any) {
 }
 
 async function handleCreateAdset(token: string, args: any) {
-  const { account_id, campaign_id, name, optimization_goal, billing_event, daily_budget, status = 'PAUSED', targeting, promoted_object } = args
+  const { account_id, campaign_id, name, optimization_goal, billing_event, daily_budget, status = 'PAUSED', targeting, promoted_object, bid_strategy } = args
 
   const body: Record<string, any> = {
     campaign_id,
@@ -939,6 +940,7 @@ async function handleCreateAdset(token: string, args: any) {
     targeting,
   }
   if (promoted_object) body.promoted_object = promoted_object
+  if (bid_strategy) body.bid_strategy = bid_strategy
 
   const data = await metaPost(token, `${account_id}/adsets`, body)
   return { success: true, adset_id: data.id, message: `Ad set "${name}" created successfully` }
