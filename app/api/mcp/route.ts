@@ -52,7 +52,12 @@ async function metaPost(token: string, path: string, body: Record<string, any> =
   const data = await res.json()
 
   if (data.error) {
-    throw new Error(`Meta API: ${data.error.message} (code ${data.error.code})`)
+    // Log full request for debugging
+    const debugBody = { ...formBody, access_token: '***' }
+    console.error('[metaPost]', url, JSON.stringify(debugBody))
+    console.error('[metaPost] response:', JSON.stringify(data.error))
+    const detail = data.error.error_user_msg || data.error.message
+    throw new Error(`Meta API: ${detail} (code ${data.error.code}, subcode ${data.error.error_subcode || 'none'}) | Sent: ${JSON.stringify(debugBody)}`)
   }
   return data
 }
@@ -894,7 +899,7 @@ async function handleCreateCampaign(token: string, args: any) {
   const {
     account_id, name, objective,
     status = 'PAUSED',
-    special_ad_categories = [],
+    special_ad_categories = ['NONE'],
     buying_type = 'AUCTION',
     bid_strategy, daily_budget,
     use_adset_level_budgets = false,
