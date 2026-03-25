@@ -32,6 +32,31 @@ async function metaFetch(token: string, path: string, params: Record<string, str
   return data
 }
 
+// ── Meta API POST helper (create/update) ─────────────────────────────
+async function metaPost(token: string, path: string, body: Record<string, any> = {}) {
+  const url = `${BASE_URL}/${path}`
+
+  // Meta API expects form-encoded params; nested objects must be JSON strings
+  const formBody: Record<string, string> = { access_token: token }
+  for (const [k, v] of Object.entries(body)) {
+    if (v === undefined || v === null) continue
+    formBody[k] = typeof v === 'object' ? JSON.stringify(v) : String(v)
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(formBody),
+    signal: AbortSignal.timeout(15000),
+  })
+  const data = await res.json()
+
+  if (data.error) {
+    throw new Error(`Meta API: ${data.error.message} (code ${data.error.code})`)
+  }
+  return data
+}
+
 // ── Shopify API helper ────────────────────────────────────────────────
 const SHOPIFY_API_VERSION = '2024-10'
 
@@ -133,6 +158,70 @@ const TOOLS = [
         date_preset: { type: 'string', description: 'Date preset for insights', default: 'last_7d' },
       },
       required: ['parent_id'],
+    },
+  },
+  // ── Meta Ads write tools ──
+  {
+    name: 'create_adset',
+    description: 'Create an ad set within an existing campaign. Budget is in cents (e.g. 8000 = $80.00). Returns the new ad set ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (e.g. act_1240971087279618)' },
+        campaign_id: { type: 'string', description: 'Campaign ID to create the ad set under' },
+        name: { type: 'string', description: 'Ad set name' },
+        optimization_goal: { type: 'string', description: 'e.g. OFFSITE_CONVERSIONS, LINK_CLICKS, IMPRESSIONS, REACH' },
+        billing_event: { type: 'string', description: 'e.g. IMPRESSIONS, LINK_CLICKS' },
+        daily_budget: { type: 'number', description: 'Daily budget in cents (e.g. 8000 = $80.00)' },
+        status: { type: 'string', description: 'PAUSED or ACTIVE (default PAUSED)' },
+        targeting: { type: 'object', description: 'Targeting spec: { geo_locations: { countries: ["CR"] }, age_min, age_max, targeting_automation, etc. }' },
+        promoted_object: { type: 'object', description: 'Promoted object: { pixel_id, custom_event_type } for conversion campaigns' },
+      },
+      required: ['account_id', 'campaign_id', 'name', 'optimization_goal', 'billing_event', 'daily_budget', 'targeting'],
+    },
+  },
+  {
+    name: 'create_ad',
+    description: 'Create an ad within an existing ad set using an existing creative ID. Returns the new ad ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_id: { type: 'string', description: 'Ad account ID (e.g. act_1240971087279618)' },
+        adset_id: { type: 'string', description: 'Ad set ID to place the ad in' },
+        name: { type: 'string', description: 'Ad name' },
+        creative_id: { type: 'string', description: 'Existing creative ID to use' },
+        status: { type: 'string', description: 'PAUSED or ACTIVE (default PAUSED)' },
+        tracking_specs: { type: 'array', description: 'Tracking specs array, e.g. [{"action.type":["offsite_conversion"],"fb_pixel":["PIXEL_ID"]}]' },
+      },
+      required: ['account_id', 'adset_id', 'name', 'creative_id'],
+    },
+  },
+  {
+    name: 'update_adset',
+    description: 'Update an existing ad set. Can change name, daily_budget (in cents), and/or status (ACTIVE, PAUSED, ARCHIVED).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        adset_id: { type: 'string', description: 'Ad set ID to update' },
+        name: { type: 'string', description: 'New name' },
+        daily_budget: { type: 'number', description: 'New daily budget in cents' },
+        status: { type: 'string', description: 'ACTIVE, PAUSED, or ARCHIVED' },
+      },
+      required: ['adset_id'],
+    },
+  },
+  {
+    name: 'update_campaign',
+    description: 'Update an existing campaign. Can change name, daily_budget (in cents), and/or status (ACTIVE, PAUSED, ARCHIVED).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID to update' },
+        name: { type: 'string', description: 'New name' },
+        daily_budget: { type: 'number', description: 'New daily budget in cents' },
+        status: { type: 'string', description: 'ACTIVE, PAUSED, or ARCHIVED' },
+      },
+      required: ['campaign_id'],
     },
   },
   // ── Shopify tools ──
@@ -368,6 +457,72 @@ async function handleGetAds(token: string, args: any) {
   return { ads, total: ads.length, date_preset }
 }
 
+// ── Meta Ads write tool implementations ──────────────────────────────
+async function handleCreateAdset(token: string, args: any) {
+  const { account_id, campaign_id, name, optimization_goal, billing_event, daily_budget, status = 'PAUSED', targeting, promoted_object } = args
+
+  const body: Record<string, any> = {
+    campaign_id,
+    name,
+    optimization_goal,
+    billing_event,
+    daily_budget,
+    status,
+    targeting,
+  }
+  if (promoted_object) body.promoted_object = promoted_object
+
+  const data = await metaPost(token, `${account_id}/adsets`, body)
+  return { success: true, adset_id: data.id, message: `Ad set "${name}" created successfully` }
+}
+
+async function handleCreateAd(token: string, args: any) {
+  const { account_id, adset_id, name, creative_id, status = 'PAUSED', tracking_specs } = args
+
+  const body: Record<string, any> = {
+    adset_id,
+    name,
+    creative: { creative_id },
+    status,
+  }
+  if (tracking_specs) body.tracking_specs = tracking_specs
+
+  const data = await metaPost(token, `${account_id}/ads`, body)
+  return { success: true, ad_id: data.id, message: `Ad "${name}" created successfully` }
+}
+
+async function handleUpdateAdset(token: string, args: any) {
+  const { adset_id, name, daily_budget, status } = args
+
+  const body: Record<string, any> = {}
+  if (name !== undefined) body.name = name
+  if (daily_budget !== undefined) body.daily_budget = daily_budget
+  if (status !== undefined) body.status = status
+
+  if (Object.keys(body).length === 0) {
+    return { success: false, message: 'No fields to update. Provide at least one of: name, daily_budget, status' }
+  }
+
+  await metaPost(token, adset_id, body)
+  return { success: true, adset_id, updated_fields: Object.keys(body), message: `Ad set ${adset_id} updated successfully` }
+}
+
+async function handleUpdateCampaign(token: string, args: any) {
+  const { campaign_id, name, daily_budget, status } = args
+
+  const body: Record<string, any> = {}
+  if (name !== undefined) body.name = name
+  if (daily_budget !== undefined) body.daily_budget = daily_budget
+  if (status !== undefined) body.status = status
+
+  if (Object.keys(body).length === 0) {
+    return { success: false, message: 'No fields to update. Provide at least one of: name, daily_budget, status' }
+  }
+
+  await metaPost(token, campaign_id, body)
+  return { success: true, campaign_id, updated_fields: Object.keys(body), message: `Campaign ${campaign_id} updated successfully` }
+}
+
 // ── Shopify tool implementations ──────────────────────────────────────
 async function handleGetProducts(args: any) {
   const { token, shop } = await getShopifyToken()
@@ -538,7 +693,7 @@ async function handleMcpMessage(msg: any) {
     case 'tools/call': {
       const toolName = params?.name
       const args = params?.arguments || {}
-      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads'].includes(toolName)
+      const isMetaTool = ['get_ad_accounts', 'get_campaigns', 'get_campaign_insights', 'get_adsets', 'get_ads', 'create_adset', 'create_ad', 'update_adset', 'update_campaign'].includes(toolName)
 
       try {
         let result: any
@@ -574,6 +729,10 @@ async function handleMcpMessage(msg: any) {
             case 'get_campaign_insights': result = await handleGetCampaignInsights(accessToken, args); break
             case 'get_adsets': result = await handleGetAdsets(accessToken, args); break
             case 'get_ads': result = await handleGetAds(accessToken, args); break
+            case 'create_adset': result = await handleCreateAdset(accessToken, args); break
+            case 'create_ad': result = await handleCreateAd(accessToken, args); break
+            case 'update_adset': result = await handleUpdateAdset(accessToken, args); break
+            case 'update_campaign': result = await handleUpdateCampaign(accessToken, args); break
           }
         } else {
           // Shopify tools (get their own token via client_credentials)
