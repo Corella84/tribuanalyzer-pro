@@ -47,6 +47,35 @@ interface ShopifyData {
   }
 }
 
+interface GA4Data {
+  overview: {
+    sessions: number
+    totalUsers: number
+    newUsers: number
+    bounceRate: number
+    avgSessionDuration: number
+    pageViews: number
+    engagementRate: number
+    conversions: number
+    revenue: number
+  }
+  trafficSources: GA4TrafficSource[]
+}
+
+interface GA4TrafficSource {
+  source: string
+  medium: string
+  sessions: number
+  users: number
+  conversions: number
+  revenue: number
+}
+
+interface GA4Property {
+  property: string
+  displayName: string
+}
+
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -96,6 +125,13 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [needsShopifyConnection, setNeedsShopifyConnection] = useState(false)
   const [shopifyLoading, setShopifyLoading] = useState(true)
 
+  // GA4 state
+  const [ga4Data, setGa4Data] = useState<GA4Data | null>(null)
+  const [needsGA4Connection, setNeedsGA4Connection] = useState(false)
+  const [ga4Loading, setGa4Loading] = useState(true)
+  const [ga4Properties, setGa4Properties] = useState<GA4Property[]>([])
+  const [selectedGA4Property, setSelectedGA4Property] = useState<string>('')
+
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -141,6 +177,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           currency,
           datePreset,
           shopifyData: shopifyData?.summary ?? null,
+          ga4Data: ga4Data?.overview ?? null,
+          ga4TrafficSources: ga4Data?.trafficSources ?? null,
         }),
         signal: controller.signal,
       })
@@ -174,19 +212,25 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       setIsAnalyzing(false)
       abortRef.current = null
     }
-  }, [chatMessages, isAnalyzing, filteredCampaigns, currency, datePreset])
+  }, [chatMessages, isAnalyzing, filteredCampaigns, currency, datePreset, ga4Data])
 
   useEffect(() => {
     const metaStatus = searchParams.get('meta')
     const shopifyStatus = searchParams.get('shopify')
+    const gaStatus = searchParams.get('ga')
     const errorParam = searchParams.get('error')
     if (metaStatus === 'connected') loadAccounts()
     if (shopifyStatus === 'connected') loadShopifyOrders()
+    if (gaStatus === 'connected') loadGA4Properties()
     if (errorParam) setError(`Error de conexión: ${errorParam}`)
   }, [searchParams])
 
   useEffect(() => { loadAccounts() }, [])
   useEffect(() => { loadShopifyOrders() }, [datePreset])
+  useEffect(() => { loadGA4Properties() }, [])
+  useEffect(() => {
+    if (selectedGA4Property) loadGA4Report()
+  }, [selectedGA4Property, datePreset])
 
   useEffect(() => {
     if (selectedAccount) loadCampaigns()
@@ -236,8 +280,60 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setShopifyLoading(false)
   }
 
+  async function loadGA4Properties() {
+    try {
+      const res = await fetch('/api/google-analytics/properties')
+      const data = await res.json()
+      if (data.needsConnection) { setNeedsGA4Connection(true); setGa4Loading(false); return }
+      if (data.success && data.properties.length > 0) {
+        setGa4Properties(data.properties)
+        setSelectedGA4Property(data.selectedPropertyId || data.properties[0].property)
+        setNeedsGA4Connection(false)
+      } else { setNeedsGA4Connection(true) }
+    } catch { setNeedsGA4Connection(true) }
+    setGa4Loading(false)
+  }
+
+  async function loadGA4Report() {
+    setGa4Loading(true)
+    try {
+      const params = new URLSearchParams({ property_id: selectedGA4Property, date_preset: datePreset })
+      const res = await fetch(`/api/google-analytics/report?${params}`)
+      const data = await res.json()
+      if (data.success) {
+        setGa4Data({ overview: data.overview, trafficSources: data.trafficSources })
+      }
+    } catch {
+      console.error('Error loading GA4 report')
+    }
+    setGa4Loading(false)
+  }
+
   const handleConnectMeta = () => { window.location.href = '/api/auth/meta' }
   const handleConnectShopify = () => { window.location.href = '/api/auth/shopify' }
+  const handleConnectGA4 = () => { window.location.href = '/api/auth/google-analytics' }
+  const handleDisconnectGA4 = async () => {
+    try {
+      const res = await fetch('/api/auth/google-analytics/disconnect', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setNeedsGA4Connection(true)
+        setGa4Data(null)
+        setGa4Properties([])
+        setSelectedGA4Property('')
+      }
+    } catch {
+      setError('Error al desconectar Google Analytics')
+    }
+  }
+  const handleSelectGA4Property = async (propertyId: string) => {
+    setSelectedGA4Property(propertyId)
+    await fetch('/api/google-analytics/select-property', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ property_id: propertyId }),
+    })
+  }
   const handleDisconnectMeta = async () => {
     try {
       const res = await fetch('/api/auth/meta/disconnect', { method: 'POST' })
@@ -336,6 +432,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 {accounts.map((acc) => (<option key={acc.id} value={acc.id}>{acc.name}</option>))}
               </select>
             )}
+            {ga4Properties.length > 0 && (
+              <select value={selectedGA4Property} onChange={(e) => handleSelectGA4Property(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-transparent">
+                {ga4Properties.map((prop) => (<option key={prop.property} value={prop.property}>{prop.displayName}</option>))}
+              </select>
+            )}
             <span className="text-sm text-slate-400">{user.email}</span>
             <button onClick={handleLogout} className="text-sm text-slate-400 hover:text-white transition-colors">Salir</button>
           </div>
@@ -378,6 +480,27 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 <button onClick={handleConnectShopify}
                   className="mt-3 px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-semibold rounded-lg hover:from-green-700 hover:to-emerald-700 transition-all shadow-sm">
                   Conectar Shopify
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GA4 Connection Alert */}
+        {needsGA4Connection && (
+          <div className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-xl p-5 mb-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-orange-900">Conecta Google Analytics 4</h3>
+                <p className="text-sm text-orange-700 mt-1">Ver sesiones, usuarios, bounce rate, conversiones y fuentes de tráfico de tu sitio web.</p>
+                <button onClick={handleConnectGA4}
+                  className="mt-3 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white text-sm font-semibold rounded-lg hover:from-orange-600 hover:to-red-600 transition-all shadow-sm">
+                  Conectar Google Analytics
                 </button>
               </div>
             </div>
@@ -450,8 +573,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           </div>
         </div>
 
-        {/* === THREE SECTIONS: Meta | Shopify | Blended === */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* === FOUR SECTIONS: Meta | Shopify | GA4 | Blended === */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
 
           {/* META ADS */}
           <div className="bg-white rounded-xl border border-blue-200/80 p-5 shadow-sm">
@@ -544,6 +667,67 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 <p className="text-sm text-slate-400 mb-3">Conecta Shopify para ver datos reales</p>
                 <button onClick={handleConnectShopify} className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-all">
                   Conectar Shopify
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* GOOGLE ANALYTICS 4 */}
+          <div className="bg-white rounded-xl border border-orange-200/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-orange-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-orange-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Google Analytics 4</h3>
+            </div>
+            {ga4Data && !ga4Loading ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Sesiones</p>
+                    <p className="text-xl font-bold text-slate-900">{ga4Data.overview.sessions.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Usuarios</p>
+                    <p className="text-xl font-bold text-slate-900">{ga4Data.overview.totalUsers.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Bounce Rate</p>
+                    <p className={`text-xl font-bold ${ga4Data.overview.bounceRate > 0.6 ? 'text-red-600' : ga4Data.overview.bounceRate > 0.4 ? 'text-amber-600' : 'text-emerald-600'}`}>{(ga4Data.overview.bounceRate * 100).toFixed(1)}%</p>
+                  </div>
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Conversiones</p>
+                    <p className="text-xl font-bold text-slate-900">{ga4Data.overview.conversions.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Page Views</p>
+                    <p className="text-xl font-bold text-slate-900">{ga4Data.overview.pageViews.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Engagement</p>
+                    <p className="text-xl font-bold text-emerald-600">{(ga4Data.overview.engagementRate * 100).toFixed(1)}%</p>
+                  </div>
+                </div>
+                {ga4Data.overview.revenue > 0 && (
+                  <div className="bg-orange-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-orange-500 uppercase tracking-wider mb-0.5">Revenue (GA4)</p>
+                    <p className="text-xl font-bold text-orange-700">{currencySymbol}{ga4Data.overview.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  </div>
+                )}
+              </div>
+            ) : ga4Loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-orange-200 border-t-orange-600 rounded-full animate-spin"></div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400 mb-3">Conecta GA4 para ver métricas web</p>
+                <button onClick={handleConnectGA4} className="px-4 py-2 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 transition-all">
+                  Conectar GA4
                 </button>
               </div>
             )}

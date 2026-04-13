@@ -18,7 +18,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { messages, campaigns, currency = 'USD', datePreset = 'last_7d' } = body
+        const { messages, campaigns, currency = 'USD', datePreset = 'last_7d', ga4Data, ga4TrafficSources } = body
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return new Response(JSON.stringify({ error: 'No hay mensajes' }), {
@@ -84,6 +84,30 @@ export async function POST(request: Request) {
 ${JSON.stringify(cleanedData, null, 2)}`
         }
 
+        // Build GA4 context
+        let ga4Context = ''
+        if (ga4Data) {
+            ga4Context = `
+
+## Datos de Google Analytics 4 del sitio web:
+- Sesiones: ${ga4Data.sessions || 0}
+- Usuarios totales: ${ga4Data.totalUsers || 0}
+- Usuarios nuevos: ${ga4Data.newUsers || 0}
+- Bounce Rate: ${((ga4Data.bounceRate || 0) * 100).toFixed(1)}%
+- Duración promedio de sesión: ${(ga4Data.avgSessionDuration || 0).toFixed(0)} segundos
+- Page Views: ${ga4Data.pageViews || 0}
+- Engagement Rate: ${((ga4Data.engagementRate || 0) * 100).toFixed(1)}%
+- Conversiones (GA4): ${ga4Data.conversions || 0}
+- Revenue (GA4): ${(ga4Data.revenue || 0).toFixed(2)} ${currency}`
+
+            if (ga4TrafficSources && Array.isArray(ga4TrafficSources) && ga4TrafficSources.length > 0) {
+                ga4Context += `
+
+**Fuentes de tráfico (Top ${ga4TrafficSources.length}):**
+${ga4TrafficSources.map((s: any) => `- ${s.source} / ${s.medium}: ${s.sessions} sesiones, ${s.users} usuarios, ${s.conversions} conversiones, ${(s.revenue || 0).toFixed(2)} ${currency} revenue`).join('\n')}`
+            }
+        }
+
         const systemPrompt = `Eres un Media Buyer Senior con más de 10 años de experiencia gestionando presupuestos de Meta Ads para marcas de e-commerce y lead generation en Latinoamérica.
 
 ## Tu rol:
@@ -97,7 +121,8 @@ Eres el consultor IA del dashboard TribuAnalyzer Pro. El usuario te puede hacer 
 - Si el usuario pide el diagnóstico completo, incluye: Resumen Ejecutivo, Creativos con Fatiga, Campañas para Escalar, Campañas para Optimizar, Recomendaciones de Apagado, y Próximos Pasos
 - Si el usuario pregunta algo específico (ej: "¿por qué baja el ROAS de X?"), responde solo eso
 - Si no hay datos suficientes, dilo explícitamente
-- Analiza el embudo: ATC → IC → Compra y señala dónde hay caídas${campaignContext}`
+- Analiza el embudo: ATC → IC → Compra y señala dónde hay caídas
+- Si tienes datos de Google Analytics 4, úsalos para analizar el comportamiento del sitio web, fuentes de tráfico, y correlacionar con los datos de Meta Ads${campaignContext}${ga4Context}`
 
         // Build conversation messages for Gemini, including history
         const geminiMessages = messages.map((m: any) => ({
