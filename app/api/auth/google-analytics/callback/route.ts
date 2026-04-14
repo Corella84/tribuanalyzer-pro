@@ -65,10 +65,15 @@ export async function GET(request: Request) {
 
     // Get Supabase user
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    console.log('GA callback - user:', user?.id, 'authError:', authError?.message)
+    console.log('GA callback - properties found:', properties.length)
+    console.log('GA callback - has refresh_token:', !!refreshToken)
 
     if (!user) {
-      return NextResponse.redirect(`${origin}/login`)
+      console.error('GA callback - No user found, redirecting to login')
+      return NextResponse.redirect(`${origin}/dashboard?error=ga_no_user`)
     }
 
     // Save GA connection to Supabase
@@ -77,7 +82,7 @@ export async function GET(request: Request) {
       .upsert({
         user_id: user.id,
         access_token: accessToken,
-        refresh_token: refreshToken,
+        refresh_token: refreshToken || '',
         token_expires_at: tokenExpiresAt,
         ga4_properties: properties,
         selected_property_id: properties.length > 0 ? properties[0].property : null,
@@ -88,9 +93,11 @@ export async function GET(request: Request) {
       })
 
     if (upsertError) {
-      console.error('Error saving GA connection:', upsertError)
+      console.error('Error saving GA connection:', upsertError.message, upsertError.details)
+      return NextResponse.redirect(`${origin}/dashboard?error=ga_save_failed`)
     }
 
+    console.log('GA callback - Connection saved successfully for user:', user.id)
     return NextResponse.redirect(`${origin}/dashboard?ga=connected`)
 
   } catch (err) {
