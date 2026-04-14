@@ -696,6 +696,26 @@ const TOOLS = [
       properties: {},
     },
   },
+  // ── Google Analytics 4 tools ──
+  {
+    name: 'get_ga4_properties',
+    description: 'Get GA4 properties connected to the user account. Returns property IDs, display names, and which one is currently selected.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'get_ga4_report',
+    description: 'Get a GA4 analytics report with overview metrics (sessions, users, bounce rate, conversions, revenue, page views, engagement rate) and top 10 traffic sources. Requires a connected GA4 property.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        property_id: { type: 'string', description: 'GA4 property ID (e.g. properties/353672496). If omitted, uses the selected property.' },
+        date_preset: { type: 'string', description: 'Date range: last_7d, last_14d, last_30d, today, yesterday (default last_7d)', default: 'last_7d' },
+      },
+    },
+  },
 ]
 
 // ── Tool implementations ──────────────────────────────────────────────
@@ -1347,6 +1367,161 @@ async function handleBulkUploadAdVideos(token: string, args: any) {
   return { results, total: results.length }
 }
 
+// ── Google Analytics 4 API helper ─────────────────────────────────────
+async function getGA4Token(): Promise<{ accessToken: string; propertyId: string; properties: any[] }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('GA4: no authenticated user')
+
+  const { data: conn } = await supabase
+    .from('google_analytics_connections')
+    .select('access_token, refresh_token, token_expires_at, ga4_properties, selected_property_id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!conn) throw new Error('GA4: no connection found. Connect Google Analytics first.')
+
+  let accessToken = conn.access_token
+  const expiresAt = new Date(conn.token_expires_at).getTime()
+
+  // Proactive refresh if token expires within 5 minutes
+  if (Date.now() > expiresAt - 5 * 60 * 1000) {
+    const clientId = process.env.GOOGLE_CLIENT_ID
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+    if (!clientId || !clientSecret) throw new Error('GA4: missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET')
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: conn.refresh_token,
+        grant_type: 'refresh_token',
+      }),
+    })
+    const tokenData = await res.json()
+    if (!tokenData.access_token) throw new Error('GA4: failed to refresh token')
+
+    accessToken = tokenData.access_token
+    const newExpiry = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString()
+
+    await supabase
+      .from('google_analytics_connections')
+      .update({ access_token: accessToken, token_expires_at: newExpiry, updated_at: new Date().toISOString() })
+      .eq('user_id', user.id)
+  }
+
+  return {
+    accessToken,
+    propertyId: conn.selected_property_id || '',
+    properties: conn.ga4_properties || [],
+  }
+}
+
+// ── GA4 tool implementations ──────────────────────────────────────────
+async function handleGetGA4Properties() {
+  const { properties, propertyId } = await getGA4Token()
+  return {
+    properties: properties.map((p: any) => ({
+      property: p.property,
+      displayName: p.displayName,
+      selected: p.property === propertyId,
+    })),
+    selectedPropertyId: propertyId,
+    total: properties.length,
+  }
+}
+
+async function handleGetGA4Report(args: any) {
+  const { accessToken, propertyId: defaultPropertyId } = await getGA4Token()
+  const propertyId = args.property_id || defaultPropertyId
+  if (!propertyId) throw new Error('GA4: no property selected. Use get_ga4_properties first.')
+
+  const numericId = propertyId.replace('properties/', '')
+  const datePreset = args.date_preset || 'last_7d'
+  const dateMap: Record<string, string> = {
+    last_7d: '7daysAgo',
+    last_14d: '14daysAgo',
+    last_30d: '30daysAgo',
+    today: 'today',
+    yesterday: 'yesterday',
+  }
+  const startDate = dateMap[datePreset] || '7daysAgo'
+
+  const apiUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${numericId}:runReport`
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+
+  // Two parallel requests: overview + traffic sources
+  const [overviewRes, trafficRes] = await Promise.all([
+    fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate, endDate: 'today' }],
+        metrics: [
+          { name: 'sessions' }, { name: 'totalUsers' }, { name: 'newUsers' },
+          { name: 'bounceRate' }, { name: 'averageSessionDuration' },
+          { name: 'screenPageViews' }, { name: 'engagementRate' },
+          { name: 'conversions' }, { name: 'totalRevenue' },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    }),
+    fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dateRanges: [{ startDate, endDate: 'today' }],
+        dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }],
+        metrics: [
+          { name: 'sessions' }, { name: 'totalUsers' },
+          { name: 'conversions' }, { name: 'totalRevenue' },
+        ],
+        orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+        limit: '10',
+      }),
+      signal: AbortSignal.timeout(15000),
+    }),
+  ])
+
+  const overviewData = await overviewRes.json()
+  const trafficData = await trafficRes.json()
+
+  if (overviewData.error) throw new Error(`GA4 API: ${overviewData.error.message}`)
+
+  // Parse overview
+  const row = overviewData.rows?.[0]?.metricValues || []
+  const overview = {
+    sessions: parseInt(row[0]?.value || '0'),
+    totalUsers: parseInt(row[1]?.value || '0'),
+    newUsers: parseInt(row[2]?.value || '0'),
+    bounceRate: parseFloat(row[3]?.value || '0'),
+    avgSessionDuration: parseFloat(row[4]?.value || '0'),
+    pageViews: parseInt(row[5]?.value || '0'),
+    engagementRate: parseFloat(row[6]?.value || '0'),
+    conversions: parseInt(row[7]?.value || '0'),
+    revenue: parseFloat(row[8]?.value || '0'),
+  }
+
+  // Parse traffic sources
+  const trafficSources = (trafficData.rows || []).map((r: any) => ({
+    source: r.dimensionValues?.[0]?.value || '(unknown)',
+    medium: r.dimensionValues?.[1]?.value || '(unknown)',
+    sessions: parseInt(r.metricValues?.[0]?.value || '0'),
+    users: parseInt(r.metricValues?.[1]?.value || '0'),
+    conversions: parseInt(r.metricValues?.[2]?.value || '0'),
+    revenue: parseFloat(r.metricValues?.[3]?.value || '0'),
+  }))
+
+  return {
+    propertyId,
+    datePreset,
+    overview,
+    trafficSources,
+  }
+}
+
 // ── Shopify tool implementations ──────────────────────────────────────
 async function handleGetProducts(args: any) {
   const { token, shop } = await getShopifyToken()
@@ -1591,6 +1766,11 @@ async function handleMcpMessage(msg: any) {
         get_collections: () => handleGetCollections(),
       }
 
+      const GA4_HANDLERS: Record<string, (a: any) => Promise<any>> = {
+        get_ga4_properties: () => handleGetGA4Properties(),
+        get_ga4_report: handleGetGA4Report,
+      }
+
       try {
         let result: any
 
@@ -1622,6 +1802,8 @@ async function handleMcpMessage(msg: any) {
           result = await META_HANDLERS[toolName](accessToken, args)
         } else if (toolName in SHOPIFY_HANDLERS) {
           result = await SHOPIFY_HANDLERS[toolName](args)
+        } else if (toolName in GA4_HANDLERS) {
+          result = await GA4_HANDLERS[toolName](args)
         } else {
           return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
         }
