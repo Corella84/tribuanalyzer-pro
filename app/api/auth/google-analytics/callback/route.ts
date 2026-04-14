@@ -47,6 +47,7 @@ export async function GET(request: Request) {
       { headers: { Authorization: `Bearer ${accessToken}` } }
     )
     const accountsData = await accountsResponse.json()
+    console.log('GA callback - Admin API response:', JSON.stringify(accountsData).slice(0, 500))
 
     // Parse properties from account summaries
     const properties: { property: string; displayName: string }[] = []
