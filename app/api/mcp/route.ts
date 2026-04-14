@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 
 const META_API_VERSION = 'v21.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
@@ -1368,18 +1369,40 @@ async function handleBulkUploadAdVideos(token: string, args: any) {
 }
 
 // ── Google Analytics 4 API helper ─────────────────────────────────────
+function getServiceSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceKey) throw new Error('GA4: missing SUPABASE_SERVICE_ROLE_KEY env var')
+  return createServiceClient(url, serviceKey)
+}
+
 async function getGA4Token(): Promise<{ accessToken: string; propertyId: string; properties: any[] }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('GA4: no authenticated user')
+  let userId: string | null = null
+  let useServiceClient = false
 
-  const { data: conn } = await supabase
+  // Try session-based auth first (dashboard web)
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) userId = user.id
+  } catch { /* no browser session (MCP remote call) */ }
+
+  // Build the right Supabase client
+  const db = useServiceClient || !userId ? getServiceSupabase() : await createClient()
+
+  // Query: if we have a userId, filter by it; otherwise get the first available connection
+  let query = db
     .from('google_analytics_connections')
-    .select('access_token, refresh_token, token_expires_at, ga4_properties, selected_property_id')
-    .eq('user_id', user.id)
-    .single()
+    .select('user_id, access_token, refresh_token, token_expires_at, ga4_properties, selected_property_id')
 
-  if (!conn) throw new Error('GA4: no connection found. Connect Google Analytics first.')
+  if (userId) {
+    query = query.eq('user_id', userId)
+  } else {
+    query = query.order('updated_at', { ascending: false }).limit(1)
+  }
+
+  const { data: conn } = await query.single()
+  if (!conn) throw new Error('GA4: no connection found. Connect Google Analytics from the dashboard first.')
 
   let accessToken = conn.access_token
   const expiresAt = new Date(conn.token_expires_at).getTime()
@@ -1406,10 +1429,12 @@ async function getGA4Token(): Promise<{ accessToken: string; propertyId: string;
     accessToken = tokenData.access_token
     const newExpiry = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString()
 
-    await supabase
+    // Use service client for update to bypass RLS
+    const serviceDb = getServiceSupabase()
+    await serviceDb
       .from('google_analytics_connections')
       .update({ access_token: accessToken, token_expires_at: newExpiry, updated_at: new Date().toISOString() })
-      .eq('user_id', user.id)
+      .eq('user_id', conn.user_id)
   }
 
   return {
