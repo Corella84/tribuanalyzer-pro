@@ -42,19 +42,32 @@ async function googleAdsQuery(accessToken: string, customerId: string, gaqlQuery
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim()
   if (!developerToken) throw new Error('Google Ads: missing GOOGLE_ADS_DEVELOPER_TOKEN')
 
+  const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || process.env.GOOGLE_ADS_MCC_ID || '').replace(/-/g, '').trim()
+
   const url = `${GOOGLE_ADS_BASE}/customers/${customerId}/googleAds:searchStream`
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'developer-token': developerToken,
+    'Content-Type': 'application/json',
+  }
+  if (loginCustomerId) {
+    headers['login-customer-id'] = loginCustomerId
+  }
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'developer-token': developerToken,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ query: gaqlQuery }),
     signal: AbortSignal.timeout(15000),
   })
 
-  const data = await res.json()
+  const text = await res.text()
+  let data: any
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error(`Google Ads API: unexpected response (status ${res.status}): ${text.slice(0, 200)}`)
+  }
   if (data.error) {
     throw new Error(`Google Ads API: ${data.error.message} (code ${data.error.code})`)
   }
