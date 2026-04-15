@@ -112,6 +112,18 @@ export const GOOGLE_ADS_TOOLS = [
       },
     },
   },
+  {
+    name: 'get_google_campaign_breakdown',
+    description: 'Get campaign performance broken down by ad network type (SEARCH, DISPLAY, YOUTUBE, etc). Returns cost, impressions, clicks, conversions, and conversion value per network.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
+        campaign_id: { type: 'string', description: 'Campaign ID to break down (optional — if omitted, all campaigns)' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month', default: 'last_7d' },
+      },
+    },
+  },
 ]
 
 // ── Handler implementations ───────────────────────────────────────────
@@ -197,10 +209,46 @@ async function handleGetGoogleKeywords(args: any) {
   return { keywords, total: keywords.length, date_preset: args.date_preset || 'last_7d' }
 }
 
+async function handleGetGoogleCampaignBreakdown(args: any) {
+  const accessToken = await getGoogleAdsAccessToken()
+  const customerId = getCustomerId(args.customer_id)
+  const preset = DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'
+
+  let query = `SELECT segments.ad_network_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING ${preset} AND campaign.status != 'REMOVED'`
+  if (args.campaign_id) {
+    query += ` AND campaign.id = ${args.campaign_id}`
+  }
+
+  const results = await googleAdsQuery(accessToken, customerId, query)
+
+  const breakdown = results.map((r: any) => {
+    const cost = r.metrics?.costMicros ? Number(r.metrics.costMicros) / 1_000_000 : 0
+    const impressions = Number(r.metrics?.impressions || 0)
+    const clicks = Number(r.metrics?.clicks || 0)
+    const conversions = Number(r.metrics?.conversions || 0)
+    const conversionsValue = Number(r.metrics?.conversionsValue || 0)
+
+    return {
+      ad_network_type: r.segments?.adNetworkType,
+      cost: +cost.toFixed(2),
+      impressions,
+      clicks,
+      ctr: impressions > 0 ? +((clicks / impressions) * 100).toFixed(2) : 0,
+      cpc: clicks > 0 ? +(cost / clicks).toFixed(2) : 0,
+      conversions: +conversions.toFixed(2),
+      conversions_value: +conversionsValue.toFixed(2),
+      roas: cost > 0 ? +(conversionsValue / cost).toFixed(2) : 0,
+    }
+  })
+
+  return { breakdown, total: breakdown.length, date_preset: args.date_preset || 'last_7d', campaign_id: args.campaign_id || 'all' }
+}
+
 // ── Exports ───────────────────────────────────────────────────────────
 
 export const GOOGLE_ADS_HANDLERS: Record<string, (args: any) => Promise<any>> = {
   get_google_campaigns: handleGetGoogleCampaigns,
   get_google_insights: handleGetGoogleInsights,
   get_google_keywords: handleGetGoogleKeywords,
+  get_google_campaign_breakdown: handleGetGoogleCampaignBreakdown,
 }
