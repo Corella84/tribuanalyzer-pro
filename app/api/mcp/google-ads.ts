@@ -1,6 +1,6 @@
 // ── Google Ads MCP Tools (REST API) ───────────────────────────────────
 
-const GOOGLE_ADS_API_VERSION = 'v17'
+const GOOGLE_ADS_API_VERSION = 'v21'
 const GOOGLE_ADS_BASE = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`
 
 const DATE_PRESET_MAP: Record<string, string> = {
