@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
+import { GOOGLE_ADS_TOOLS, GOOGLE_ADS_HANDLERS } from './google-ads'
+import { TIKTOK_TOOLS, TIKTOK_HANDLERS } from './tiktok'
 
 const META_API_VERSION = 'v21.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
@@ -714,9 +716,28 @@ const TOOLS = [
       properties: {
         property_id: { type: 'string', description: 'GA4 property ID (e.g. properties/353672496). If omitted, uses the selected property.' },
         date_preset: { type: 'string', description: 'Date range: last_7d, last_14d, last_30d, today, yesterday (default last_7d)', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start date YYYY-MM-DD (overrides date_preset)' },
+        end_date: { type: 'string', description: 'Custom end date YYYY-MM-DD (overrides date_preset)' },
       },
     },
   },
+  {
+    name: 'get_ga4_attribution_paths',
+    description: 'Get multi-touch attribution paths showing which channel combinations lead to conversions. Shows sessionDefaultChannelGroup, firstUserSource, and sessionSource with conversions, revenue, and sessions. Filtered to purchase events.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        property_id: { type: 'string', description: 'GA4 property ID. If omitted, uses selected.' },
+        date_preset: { type: 'string', description: 'last_7d, last_14d, last_30d, today, yesterday', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start YYYY-MM-DD (overrides preset)' },
+        end_date: { type: 'string', description: 'Custom end YYYY-MM-DD (overrides preset)' },
+      },
+    },
+  },
+  // ── Google Ads tools ──
+  ...GOOGLE_ADS_TOOLS,
+  // ── TikTok Ads tools ──
+  ...TIKTOK_TOOLS,
 ]
 
 // ── Tool implementations ──────────────────────────────────────────────
@@ -1465,14 +1486,29 @@ async function handleGetGA4Report(args: any) {
 
   const numericId = propertyId.replace('properties/', '')
   const datePreset = args.date_preset || 'last_7d'
-  const dateMap: Record<string, string> = {
-    last_7d: '7daysAgo',
-    last_14d: '14daysAgo',
-    last_30d: '30daysAgo',
-    today: 'today',
-    yesterday: 'yesterday',
+
+  let startDate: string
+  let endDate: string
+
+  if (args.start_date && args.end_date) {
+    // Custom date range — validate YYYY-MM-DD format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+    if (!dateRegex.test(args.start_date) || !dateRegex.test(args.end_date)) {
+      throw new Error('GA4: start_date and end_date must be in YYYY-MM-DD format')
+    }
+    startDate = args.start_date
+    endDate = args.end_date
+  } else {
+    const dateMap: Record<string, string> = {
+      last_7d: '7daysAgo',
+      last_14d: '14daysAgo',
+      last_30d: '30daysAgo',
+      today: 'today',
+      yesterday: 'yesterday',
+    }
+    startDate = dateMap[datePreset] || '7daysAgo'
+    endDate = 'today'
   }
-  const startDate = dateMap[datePreset] || '7daysAgo'
 
   const apiUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${numericId}:runReport`
   const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
@@ -1483,7 +1519,7 @@ async function handleGetGA4Report(args: any) {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        dateRanges: [{ startDate, endDate: 'today' }],
+        dateRanges: [{ startDate, endDate }],
         metrics: [
           { name: 'sessions' }, { name: 'totalUsers' }, { name: 'newUsers' },
           { name: 'bounceRate' }, { name: 'averageSessionDuration' },
@@ -1497,7 +1533,7 @@ async function handleGetGA4Report(args: any) {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        dateRanges: [{ startDate, endDate: 'today' }],
+        dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }],
         metrics: [
           { name: 'sessions' }, { name: 'totalUsers' },
@@ -1544,6 +1580,84 @@ async function handleGetGA4Report(args: any) {
     datePreset,
     overview,
     trafficSources,
+  }
+}
+
+async function handleGetGA4AttributionPaths(args: any) {
+  const { accessToken, propertyId: defaultPropertyId } = await getGA4Token()
+  const propertyId = args.property_id || defaultPropertyId
+  if (!propertyId) throw new Error('GA4: no property selected. Use get_ga4_properties first.')
+
+  const numericId = propertyId.replace('properties/', '')
+
+  let startDate: string
+  let endDate: string
+
+  if (args.start_date && args.end_date) {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+    if (!dateRegex.test(args.start_date) || !dateRegex.test(args.end_date)) {
+      throw new Error('GA4: start_date and end_date must be in YYYY-MM-DD format')
+    }
+    startDate = args.start_date
+    endDate = args.end_date
+  } else {
+    const datePreset = args.date_preset || 'last_7d'
+    const dateMap: Record<string, string> = {
+      last_7d: '7daysAgo',
+      last_14d: '14daysAgo',
+      last_30d: '30daysAgo',
+      today: 'today',
+      yesterday: 'yesterday',
+    }
+    startDate = dateMap[datePreset] || '7daysAgo'
+    endDate = 'today'
+  }
+
+  const apiUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${numericId}:runReport`
+  const res = await fetch(apiUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [
+        { name: 'sessionDefaultChannelGroup' },
+        { name: 'firstUserSource' },
+        { name: 'sessionSource' },
+      ],
+      metrics: [
+        { name: 'conversions' },
+        { name: 'totalRevenue' },
+        { name: 'sessions' },
+      ],
+      dimensionFilter: {
+        filter: {
+          fieldName: 'eventName',
+          stringFilter: { matchType: 'EXACT', value: 'purchase' },
+        },
+      },
+      orderBys: [{ metric: { metricName: 'conversions' }, desc: true }],
+      limit: '50',
+    }),
+    signal: AbortSignal.timeout(15000),
+  })
+
+  const data = await res.json()
+  if (data.error) throw new Error(`GA4 API: ${data.error.message}`)
+
+  const paths = (data.rows || []).map((r: any) => ({
+    channel: r.dimensionValues?.[0]?.value || '(unknown)',
+    firstSource: r.dimensionValues?.[1]?.value || '(unknown)',
+    sessionSource: r.dimensionValues?.[2]?.value || '(unknown)',
+    conversions: parseInt(r.metricValues?.[0]?.value || '0'),
+    revenue: parseFloat(r.metricValues?.[1]?.value || '0'),
+    sessions: parseInt(r.metricValues?.[2]?.value || '0'),
+  }))
+
+  return {
+    propertyId,
+    dateRange: { startDate, endDate },
+    paths,
+    total: paths.length,
   }
 }
 
@@ -1794,6 +1908,7 @@ async function handleMcpMessage(msg: any) {
       const GA4_HANDLERS: Record<string, (a: any) => Promise<any>> = {
         get_ga4_properties: () => handleGetGA4Properties(),
         get_ga4_report: handleGetGA4Report,
+        get_ga4_attribution_paths: handleGetGA4AttributionPaths,
       }
 
       try {
@@ -1829,6 +1944,10 @@ async function handleMcpMessage(msg: any) {
           result = await SHOPIFY_HANDLERS[toolName](args)
         } else if (toolName in GA4_HANDLERS) {
           result = await GA4_HANDLERS[toolName](args)
+        } else if (toolName in GOOGLE_ADS_HANDLERS) {
+          result = await GOOGLE_ADS_HANDLERS[toolName](args)
+        } else if (toolName in TIKTOK_HANDLERS) {
+          result = await TIKTOK_HANDLERS[toolName](args)
         } else {
           return jsonrpcError(id, -32601, `Unknown tool: ${toolName}`)
         }
