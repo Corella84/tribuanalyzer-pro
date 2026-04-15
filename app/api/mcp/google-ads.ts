@@ -42,16 +42,11 @@ async function googleAdsQuery(accessToken: string, customerId: string, gaqlQuery
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim()
   if (!developerToken) throw new Error('Google Ads: missing GOOGLE_ADS_DEVELOPER_TOKEN')
 
-  const loginCustomerId = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || process.env.GOOGLE_ADS_MCC_ID || '').replace(/-/g, '').trim()
-
-  const url = `${GOOGLE_ADS_BASE}/customers/${customerId}/googleAds:searchStream`
+  const url = `${GOOGLE_ADS_BASE}/customers/${customerId}/googleAds:search`
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${accessToken}`,
     'developer-token': developerToken,
     'Content-Type': 'application/json',
-  }
-  if (loginCustomerId) {
-    headers['login-customer-id'] = loginCustomerId
   }
 
   const res = await fetch(url, {
@@ -72,13 +67,7 @@ async function googleAdsQuery(accessToken: string, customerId: string, gaqlQuery
     throw new Error(`Google Ads API: ${data.error.message} (code ${data.error.code})`)
   }
 
-  // searchStream returns an array of batches, each with a results array
-  const batches = Array.isArray(data) ? data : [data]
-  const results: any[] = []
-  for (const batch of batches) {
-    if (batch.results) results.push(...batch.results)
-  }
-  return results
+  return data.results || []
 }
 
 function getCustomerId(argsId?: string): string {
