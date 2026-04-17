@@ -11,6 +11,7 @@ interface DashboardClientProps {
 
 type DatePreset = 'last_7d' | 'last_14d' | 'last_30d'
 type StatusFilter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+type Platform = 'meta' | 'tiktok'
 
 interface Campaign {
   name: string
@@ -110,6 +111,7 @@ const quickQuestions = [
 ]
 
 export default function DashboardClient({ user }: DashboardClientProps) {
+  const [platform, setPlatform] = useState<Platform>('meta')
   const [datePreset, setDatePreset] = useState<DatePreset>('last_7d')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
@@ -131,6 +133,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [ga4Loading, setGa4Loading] = useState(true)
   const [ga4Properties, setGa4Properties] = useState<GA4Property[]>([])
   const [selectedGA4Property, setSelectedGA4Property] = useState<string>('')
+
+  // TikTok state
+  const [tiktokAccounts, setTiktokAccounts] = useState<AdAccount[]>([])
+  const [selectedTiktokAccount, setSelectedTiktokAccount] = useState<string>('')
+  const [tiktokNeedsConnection, setTiktokNeedsConnection] = useState(false)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -176,6 +183,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           campaigns: filteredCampaigns,
           currency,
           datePreset,
+          platform,
           shopifyData: shopifyData?.summary ?? null,
           ga4Data: ga4Data?.overview ?? null,
           ga4TrafficSources: ga4Data?.trafficSources ?? null,
@@ -212,20 +220,22 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       setIsAnalyzing(false)
       abortRef.current = null
     }
-  }, [chatMessages, isAnalyzing, filteredCampaigns, currency, datePreset, ga4Data])
+  }, [chatMessages, isAnalyzing, filteredCampaigns, currency, datePreset, platform, ga4Data])
 
   useEffect(() => {
     const metaStatus = searchParams.get('meta')
+    const tiktokStatus = searchParams.get('tiktok')
     const shopifyStatus = searchParams.get('shopify')
     const gaStatus = searchParams.get('ga')
     const errorParam = searchParams.get('error')
     if (metaStatus === 'connected') loadAccounts()
+    if (tiktokStatus === 'connected') { loadTiktokAccounts(); setPlatform('tiktok') }
     if (shopifyStatus === 'connected') loadShopifyOrders()
     if (gaStatus === 'connected') loadGA4Properties()
     if (errorParam) setError(`Error de conexión: ${errorParam}`)
   }, [searchParams])
 
-  useEffect(() => { loadAccounts() }, [])
+  useEffect(() => { loadAccounts(); loadTiktokAccounts() }, [])
   useEffect(() => { loadShopifyOrders() }, [datePreset])
   useEffect(() => { loadGA4Properties() }, [])
   useEffect(() => {
@@ -233,21 +243,36 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }, [selectedGA4Property, datePreset])
 
   useEffect(() => {
-    if (selectedAccount) loadCampaigns()
-  }, [selectedAccount, datePreset, statusFilter])
+    if (platform === 'meta' && selectedAccount) loadCampaigns()
+    if (platform === 'tiktok' && selectedTiktokAccount) loadTiktokCampaigns()
+  }, [platform, selectedAccount, selectedTiktokAccount, datePreset, statusFilter])
 
   async function loadAccounts() {
     try {
       const response = await fetch('/api/meta/accounts')
       const data = await response.json()
-      if (data.needsConnection) { setNeedsConnection(true); setLoading(false); return }
+      if (data.needsConnection) { setNeedsConnection(true); if (platform === 'meta') setLoading(false); return }
       if (data.success && data.accounts.length > 0) {
         setAccounts(data.accounts)
         setSelectedAccount(data.accounts[0].id)
         setNeedsConnection(false)
       } else { setNeedsConnection(true) }
     } catch { setNeedsConnection(true) }
-    setLoading(false)
+    if (platform === 'meta') setLoading(false)
+  }
+
+  async function loadTiktokAccounts() {
+    try {
+      const response = await fetch('/api/tiktok/advertisers')
+      const data = await response.json()
+      if (data.needsConnection) { setTiktokNeedsConnection(true); if (platform === 'tiktok') setLoading(false); return }
+      if (data.success && data.accounts.length > 0) {
+        setTiktokAccounts(data.accounts)
+        setSelectedTiktokAccount(data.accounts[0].id)
+        setTiktokNeedsConnection(false)
+      } else { setTiktokNeedsConnection(true) }
+    } catch { setTiktokNeedsConnection(true) }
+    if (platform === 'tiktok') setLoading(false)
   }
 
   async function loadCampaigns() {
@@ -260,6 +285,19 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       else if (data.needsConnection) setNeedsConnection(true)
       else setError(data.error)
     } catch { setError('Error cargando campañas') }
+    setLoading(false)
+  }
+
+  async function loadTiktokCampaigns() {
+    setLoading(true); setError(null)
+    try {
+      const params = new URLSearchParams({ advertiser_id: selectedTiktokAccount, date_preset: datePreset, status: statusFilter })
+      const response = await fetch(`/api/tiktok/campaigns?${params}`)
+      const data = await response.json()
+      if (data.success) { setCampaigns(data.data); setCurrency(data.currency || 'USD') }
+      else if (data.needsConnection) setTiktokNeedsConnection(true)
+      else setError(data.error)
+    } catch { setError('Error cargando campañas TikTok') }
     setLoading(false)
   }
 
@@ -310,6 +348,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }
 
   const handleConnectMeta = () => { window.location.href = '/api/auth/meta' }
+  const handleConnectTiktok = () => { window.location.href = '/api/auth/tiktok' }
   const handleConnectShopify = () => { window.location.href = '/api/auth/shopify' }
   const handleConnectGA4 = () => { window.location.href = '/api/auth/google-analytics' }
   const handleDisconnectGA4 = async () => {
@@ -350,6 +389,13 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     }
   }
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login'); router.refresh() }
+
+  const currentNeedsConnection = platform === 'meta' ? needsConnection : tiktokNeedsConnection
+  const currentAccounts = platform === 'meta' ? accounts : tiktokAccounts
+  const currentSelectedAccount = platform === 'meta' ? selectedAccount : selectedTiktokAccount
+  const setCurrentSelectedAccount = platform === 'meta' ? setSelectedAccount : setSelectedTiktokAccount
+  const handleConnect = platform === 'meta' ? handleConnectMeta : handleConnectTiktok
+  const platformLabel = platform === 'meta' ? 'Meta Ads' : 'TikTok Ads'
 
   const totals = filteredCampaigns.reduce((acc, c) => ({
     spend: acc.spend + c.spend,
@@ -426,10 +472,21 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {accounts.length > 0 && (
-              <select value={selectedAccount} onChange={(e) => setSelectedAccount(e.target.value)}
+            {/* Platform selector */}
+            <div className="flex bg-slate-700/50 rounded-lg p-0.5">
+              <button onClick={() => setPlatform('meta')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${platform === 'meta' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                Meta
+              </button>
+              <button onClick={() => setPlatform('tiktok')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${platform === 'tiktok' ? 'bg-[#00f2ea] text-black shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                TikTok
+              </button>
+            </div>
+            {currentAccounts.length > 0 && (
+              <select value={currentSelectedAccount} onChange={(e) => setCurrentSelectedAccount(e.target.value)}
                 className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                {accounts.map((acc) => (<option key={acc.id} value={acc.id}>{acc.name}</option>))}
+                {currentAccounts.map((acc) => (<option key={acc.id} value={acc.id}>{acc.name}</option>))}
               </select>
             )}
             {ga4Properties.length > 0 && (
@@ -445,20 +502,24 @@ export default function DashboardClient({ user }: DashboardClientProps) {
       </header>
 
       <main className="max-w-[1400px] mx-auto px-6 py-6">
-        {/* Alert - Connect Meta */}
-        {needsConnection && (
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5 mb-6 shadow-sm">
+        {/* Alert - Connect Platform */}
+        {currentNeedsConnection && (
+          <div className={`border rounded-xl p-5 mb-6 shadow-sm ${platform === 'tiktok' ? 'bg-gradient-to-r from-slate-50 to-slate-100 border-slate-300' : 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200'}`}>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${platform === 'tiktok' ? 'bg-slate-200' : 'bg-amber-100'}`}>
+                {platform === 'tiktok' ? (
+                  <span className="text-lg">🎵</span>
+                ) : (
+                  <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                )}
               </div>
               <div>
-                <h3 className="font-semibold text-amber-900">Conecta tu cuenta de Meta Ads</h3>
-                <p className="text-sm text-amber-700 mt-1">Para ver tus campañas reales, conecta tu cuenta de Meta Business.</p>
-                <button onClick={handleConnectMeta} className="mt-3 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-semibold rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all shadow-sm">
-                  Conectar Meta Ads
+                <h3 className={`font-semibold ${platform === 'tiktok' ? 'text-slate-900' : 'text-amber-900'}`}>Conecta tu cuenta de {platformLabel}</h3>
+                <p className={`text-sm mt-1 ${platform === 'tiktok' ? 'text-slate-600' : 'text-amber-700'}`}>Para ver tus campañas reales, conecta tu cuenta de {platformLabel}.</p>
+                <button onClick={handleConnect} className={`mt-3 px-5 py-2.5 text-white text-sm font-semibold rounded-lg transition-all shadow-sm ${platform === 'tiktok' ? 'bg-gradient-to-r from-[#ff0050] to-[#00f2ea] hover:opacity-90' : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'}`}>
+                  Conectar {platformLabel}
                 </button>
               </div>
             </div>
@@ -551,10 +612,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                 ))}
               </div>
             </div>
-            {!needsConnection && (
+            {!currentNeedsConnection && (
               <>
                 <div className="w-px h-6 bg-slate-200"></div>
-                <button onClick={loadCampaigns} disabled={loading}
+                <button onClick={() => platform === 'meta' ? loadCampaigns() : loadTiktokCampaigns()} disabled={loading}
                   className="px-3 py-1.5 text-sm font-medium text-slate-500 rounded-lg hover:bg-slate-100 disabled:opacity-50 transition-all flex items-center gap-1.5">
                   <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -804,7 +865,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             </div>
           ) : filteredCampaigns.length === 0 ? (
             <div className="p-16 text-center text-slate-400">
-              {needsConnection ? 'Conecta tu cuenta de Meta para ver campañas' : 'No hay campañas para mostrar'}
+              {currentNeedsConnection ? `Conecta tu cuenta de ${platformLabel} para ver campañas` : 'No hay campañas para mostrar'}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -902,7 +963,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <div className="flex flex-wrap gap-2">
                 {quickQuestions.map((q, idx) => (
                   <button key={idx} onClick={() => sendChatMessage(q.prompt)}
-                    disabled={needsConnection || filteredCampaigns.length === 0 || isAnalyzing}
+                    disabled={currentNeedsConnection || filteredCampaigns.length === 0 || isAnalyzing}
                     className="px-3 py-2 text-sm font-medium bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 transition-all hover:border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed">
                     {q.label}
                   </button>
@@ -921,8 +982,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                   </svg>
                 </div>
                 <p className="text-slate-400 text-sm max-w-md mx-auto">
-                  {needsConnection
-                    ? 'Conecta tu cuenta de Meta para chatear con tu Media Buyer IA'
+                  {currentNeedsConnection
+                    ? `Conecta tu cuenta de ${platformLabel} para chatear con tu Media Buyer IA`
                     : filteredCampaigns.length === 0
                       ? 'No hay campañas para analizar'
                       : 'Usa las preguntas rápidas arriba o escribe tu propia pregunta'}
@@ -982,12 +1043,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder={needsConnection ? 'Conecta Meta primero...' : 'Pregunta sobre tus campañas... (ej: ¿Por qué bajó el ROAS?)'}
-                disabled={needsConnection || filteredCampaigns.length === 0 || isAnalyzing}
+                placeholder={currentNeedsConnection ? `Conecta ${platformLabel} primero...` : 'Pregunta sobre tus campañas... (ej: ¿Por qué bajó el ROAS?)'}
+                disabled={currentNeedsConnection || filteredCampaigns.length === 0 || isAnalyzing}
                 className="flex-1 px-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-slate-400"
               />
               <button type="submit"
-                disabled={!chatInput.trim() || isAnalyzing || needsConnection || filteredCampaigns.length === 0}
+                disabled={!chatInput.trim() || isAnalyzing || currentNeedsConnection || filteredCampaigns.length === 0}
                 className="px-5 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-semibold rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg flex items-center gap-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

@@ -18,7 +18,7 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json()
-        const { messages, campaigns, currency = 'USD', datePreset = 'last_7d', ga4Data, ga4TrafficSources } = body
+        const { messages, campaigns, currency = 'USD', datePreset = 'last_7d', platform = 'meta', ga4Data, ga4TrafficSources } = body
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             return new Response(JSON.stringify({ error: 'No hay mensajes' }), {
@@ -67,9 +67,10 @@ export async function POST(request: Request) {
                 roas: c.roas,
             }))
 
+            const platformName = platform === 'tiktok' ? 'TikTok Ads' : 'Meta Ads'
             campaignContext = `
 
-## Datos de la cuenta de Meta Ads del usuario:
+## Datos de la cuenta de ${platformName} del usuario:
 - Moneda: ${currency}
 - Período: ${periodLabel}
 - Total de campañas: ${campaigns.length} (${activeCampaigns} activas)
