@@ -37,14 +37,11 @@ async function gaqlQuery(accessToken: string, customerId: string, query: string)
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim()
   if (!developerToken) throw new Error('Missing GOOGLE_ADS_DEVELOPER_TOKEN')
 
-  const mccId = process.env.GOOGLE_ADS_MCC_ID?.trim()?.replace(/-/g, '')
-
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${accessToken}`,
     'developer-token': developerToken,
     'Content-Type': 'application/json',
   }
-  if (mccId) headers['login-customer-id'] = mccId
 
   const res = await fetch(`${GOOGLE_ADS_BASE}/customers/${customerId}/googleAds:search`, {
     method: 'POST',
