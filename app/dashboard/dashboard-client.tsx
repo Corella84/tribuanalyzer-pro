@@ -138,6 +138,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [tiktokAccounts, setTiktokAccounts] = useState<AdAccount[]>([])
   const [selectedTiktokAccount, setSelectedTiktokAccount] = useState<string>('')
   const [tiktokNeedsConnection, setTiktokNeedsConnection] = useState(false)
+  const [tiktokCampaigns, setTiktokCampaigns] = useState<Campaign[]>([])
+  const [tiktokLoading, setTiktokLoading] = useState(true)
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -244,7 +246,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
 
   useEffect(() => {
     if (platform === 'meta' && selectedAccount) loadCampaigns()
-    if (platform === 'tiktok' && selectedTiktokAccount) loadTiktokCampaigns()
+    if (selectedTiktokAccount) loadTiktokCampaigns()
   }, [platform, selectedAccount, selectedTiktokAccount, datePreset, statusFilter])
 
   async function loadAccounts() {
@@ -289,16 +291,20 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }
 
   async function loadTiktokCampaigns() {
-    setLoading(true); setError(null)
+    setTiktokLoading(true); setError(null)
     try {
       const params = new URLSearchParams({ advertiser_id: selectedTiktokAccount, date_preset: datePreset, status: statusFilter })
       const response = await fetch(`/api/tiktok/campaigns?${params}`)
       const data = await response.json()
-      if (data.success) { setCampaigns(data.data); setCurrency(data.currency || 'USD') }
+      if (data.success) {
+        setTiktokCampaigns(data.data)
+        if (platform === 'tiktok') { setCampaigns(data.data); setCurrency(data.currency || 'USD') }
+      }
       else if (data.needsConnection) setTiktokNeedsConnection(true)
       else setError(data.error)
     } catch { setError('Error cargando campañas TikTok') }
-    setLoading(false)
+    setTiktokLoading(false)
+    if (platform === 'tiktok') setLoading(false)
   }
 
   async function loadShopifyOrders() {
@@ -634,8 +640,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           </div>
         </div>
 
-        {/* === FOUR SECTIONS: Meta | Shopify | GA4 | Blended === */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+        {/* === FIVE SECTIONS: Meta | TikTok | Shopify | GA4 | Blended === */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
 
           {/* META ADS */}
           <div className="bg-white rounded-xl border border-blue-200/80 p-5 shadow-sm">
@@ -690,6 +696,75 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             ) : (
               <div className="text-center py-8">
                 <p className="text-sm text-slate-400">No hay campañas con el filtro actual</p>
+              </div>
+            )}
+          </div>
+
+          {/* TIKTOK ADS */}
+          <div className="bg-white rounded-xl border border-slate-300/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-slate-900 rounded-lg flex items-center justify-center">
+                <span className="text-xs">🎵</span>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">TikTok Ads</h3>
+            </div>
+            {!tiktokLoading && !tiktokNeedsConnection && tiktokCampaigns.length > 0 ? (() => {
+              const tt = tiktokCampaigns.reduce((acc, c) => ({
+                spend: acc.spend + c.spend,
+                revenue: acc.revenue + c.revenue,
+                purchases: acc.purchases + c.purchases,
+                clicks: acc.clicks + c.clicks,
+                impressions: acc.impressions + c.impressions,
+              }), { spend: 0, revenue: 0, purchases: 0, clicks: 0, impressions: 0 })
+              const ttRoas = tt.spend > 0 ? tt.revenue / tt.spend : 0
+              const ttCpa = tt.purchases > 0 ? tt.spend / tt.purchases : 0
+              const ttCtr = tt.impressions > 0 ? (tt.clicks / tt.impressions) * 100 : 0
+              return (
+                <div className="space-y-3">
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Gasto</p>
+                    <p className="text-xl font-bold text-slate-900">{currencySymbol}{tt.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Revenue (TikTok)</p>
+                    <p className="text-xl font-bold text-slate-700">{currencySymbol}{tt.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">ROAS</p>
+                      <p className={`text-xl font-bold ${getRoasColor(ttRoas)}`}>{ttRoas.toFixed(2)}x</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Compras</p>
+                      <p className="text-xl font-bold text-slate-900">{tt.purchases}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">CPA</p>
+                      <p className="text-xl font-bold text-slate-900">{currencySymbol}{ttCpa.toFixed(2)}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">CTR</p>
+                      <p className={`text-xl font-bold ${getCtrColor(ttCtr)}`}>{ttCtr.toFixed(2)}%</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })() : tiktokLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-slate-200 border-t-slate-600 rounded-full animate-spin"></div>
+              </div>
+            ) : tiktokNeedsConnection ? (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400 mb-3">Conecta TikTok para ver métricas</p>
+                <button onClick={handleConnectTiktok} className="px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 transition-all">
+                  Conectar TikTok
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400">Sin campañas con el filtro actual</p>
               </div>
             )}
           </div>
