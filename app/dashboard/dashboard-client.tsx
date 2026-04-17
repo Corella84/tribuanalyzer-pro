@@ -141,6 +141,11 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [tiktokCampaigns, setTiktokCampaigns] = useState<Campaign[]>([])
   const [tiktokLoading, setTiktokLoading] = useState(true)
 
+  // Google Ads state
+  const [gAdsCampaigns, setGAdsCampaigns] = useState<Campaign[]>([])
+  const [gAdsLoading, setGAdsLoading] = useState(true)
+  const [gAdsNeedsConnection, setGAdsNeedsConnection] = useState(false)
+
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -243,6 +248,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   useEffect(() => {
     if (selectedGA4Property) loadGA4Report()
   }, [selectedGA4Property, datePreset])
+  useEffect(() => { loadGAdsCampaigns() }, [datePreset, statusFilter])
 
   useEffect(() => {
     if (platform === 'meta' && selectedAccount) loadCampaigns()
@@ -305,6 +311,24 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     } catch { setError('Error cargando campañas TikTok') }
     setTiktokLoading(false)
     if (platform === 'tiktok') setLoading(false)
+  }
+
+  async function loadGAdsCampaigns() {
+    setGAdsLoading(true)
+    try {
+      const params = new URLSearchParams({ date_preset: datePreset, status: statusFilter })
+      const res = await fetch(`/api/google-ads/campaigns?${params}`)
+      const data = await res.json()
+      if (data.success) {
+        setGAdsCampaigns(data.data)
+        setGAdsNeedsConnection(false)
+      } else if (data.needsConnection) {
+        setGAdsNeedsConnection(true)
+      }
+    } catch {
+      setGAdsNeedsConnection(true)
+    }
+    setGAdsLoading(false)
   }
 
   async function loadShopifyOrders() {
@@ -640,8 +664,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
           </div>
         </div>
 
-        {/* === FIVE SECTIONS: Meta | TikTok | Shopify | GA4 | Blended === */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+        {/* === SIX SECTIONS: Meta | TikTok | Google Ads | Shopify | GA4 | Blended === */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
 
           {/* META ADS */}
           <div className="bg-white rounded-xl border border-blue-200/80 p-5 shadow-sm">
@@ -769,6 +793,72 @@ export default function DashboardClient({ user }: DashboardClientProps) {
             )}
           </div>
 
+          {/* GOOGLE ADS */}
+          <div className="bg-white rounded-xl border border-yellow-200/80 p-5 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-yellow-700" fill="currentColor" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Google Ads</h3>
+            </div>
+            {!gAdsLoading && !gAdsNeedsConnection && gAdsCampaigns.length > 0 ? (() => {
+              const ga = gAdsCampaigns.reduce((acc, c) => ({
+                spend: acc.spend + c.spend,
+                revenue: acc.revenue + c.revenue,
+                purchases: acc.purchases + c.purchases,
+                clicks: acc.clicks + c.clicks,
+                impressions: acc.impressions + c.impressions,
+              }), { spend: 0, revenue: 0, purchases: 0, clicks: 0, impressions: 0 })
+              const gaRoas = ga.spend > 0 ? ga.revenue / ga.spend : 0
+              const gaCpa = ga.purchases > 0 ? ga.spend / ga.purchases : 0
+              const gaCtr = ga.impressions > 0 ? (ga.clicks / ga.impressions) * 100 : 0
+              return (
+                <div className="space-y-3">
+                  <div className="bg-yellow-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">Gasto</p>
+                    <p className="text-xl font-bold text-slate-900">{currencySymbol}{ga.spend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="bg-yellow-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">Conv. Value (GAds)</p>
+                    <p className="text-xl font-bold text-yellow-700">{currencySymbol}{ga.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-yellow-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">ROAS</p>
+                      <p className={`text-xl font-bold ${getRoasColor(gaRoas)}`}>{gaRoas.toFixed(2)}x</p>
+                    </div>
+                    <div className="bg-yellow-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">Conversiones</p>
+                      <p className="text-xl font-bold text-slate-900">{ga.purchases}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-yellow-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">CPA</p>
+                      <p className="text-xl font-bold text-slate-900">{currencySymbol}{gaCpa.toFixed(2)}</p>
+                    </div>
+                    <div className="bg-yellow-50/50 rounded-lg p-3">
+                      <p className="text-[10px] font-semibold text-yellow-600 uppercase tracking-wider mb-0.5">CTR</p>
+                      <p className={`text-xl font-bold ${getCtrColor(gaCtr)}`}>{gaCtr.toFixed(2)}%</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })() : gAdsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-8 h-8 border-2 border-yellow-200 border-t-yellow-600 rounded-full animate-spin"></div>
+              </div>
+            ) : gAdsNeedsConnection ? (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400 mb-3">Google Ads no configurado</p>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-sm text-slate-400">Sin campañas con el filtro actual</p>
+              </div>
+            )}
+          </div>
+
           {/* SHOPIFY */}
           <div className="bg-white rounded-xl border border-green-200/80 p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
@@ -881,14 +971,18 @@ export default function DashboardClient({ user }: DashboardClientProps) {
               <div className="flex items-center justify-center py-12">
                 <div className="w-8 h-8 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
               </div>
-            ) : shopifyData && totals.spend > 0 ? (() => {
+            ) : shopifyData ? (() => {
+              const metaSpend = totals.spend
+              const ttSpend = tiktokCampaigns.reduce((s, c) => s + c.spend, 0)
+              const gaSpend = gAdsCampaigns.reduce((s, c) => s + c.spend, 0)
+              const totalAdSpend = metaSpend + ttSpend + gaSpend
               const realRevenue = shopifyData.summary.totalRevenue
-              const adSpend = totals.spend
-              const roasBlended = adSpend > 0 ? realRevenue / adSpend : 0
-              const profit = realRevenue - adSpend
+              const roasBlended = totalAdSpend > 0 ? realRevenue / totalAdSpend : 0
+              const profit = realRevenue - totalAdSpend
               const realOrders = shopifyData.summary.totalOrders
-              const cpaReal = realOrders > 0 ? adSpend / realOrders : 0
-              const attrPct = totals.revenue > 0 ? (realRevenue / totals.revenue) * 100 : 0
+              const cpaReal = realOrders > 0 ? totalAdSpend / realOrders : 0
+              const platformRevenue = totals.revenue + tiktokCampaigns.reduce((s, c) => s + c.revenue, 0) + gAdsCampaigns.reduce((s, c) => s + c.revenue, 0)
+              const attrPct = platformRevenue > 0 ? (realRevenue / platformRevenue) * 100 : 0
               return (
                 <div className="space-y-3">
                   <div className="bg-purple-50/50 rounded-lg p-3">
@@ -898,6 +992,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                   <div className="bg-purple-50/50 rounded-lg p-3">
                     <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">Profit</p>
                     <p className={`text-xl font-bold ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{currencySymbol}{profit.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="bg-purple-50/50 rounded-lg p-3">
+                    <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-0.5">Ad Spend Total</p>
+                    <p className="text-xl font-bold text-slate-900">{currencySymbol}{totalAdSpend.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-purple-50/50 rounded-lg p-3">
@@ -910,16 +1008,14 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     </div>
                   </div>
                   <div className="mt-2 pt-2 border-t border-purple-100">
-                    <p className="text-[10px] text-slate-400">Meta dice {currencySymbol}{totals.revenue.toLocaleString('en-US', { minimumFractionDigits: 0 })} · Shopify real {currencySymbol}{realRevenue.toLocaleString('en-US', { minimumFractionDigits: 0 })}</p>
+                    <p className="text-[10px] text-slate-400">Meta ₡{metaSpend.toLocaleString('en-US', { minimumFractionDigits: 0 })} + TikTok ₡{ttSpend.toLocaleString('en-US', { minimumFractionDigits: 0 })} + GAds ₡{gaSpend.toLocaleString('en-US', { minimumFractionDigits: 0 })} · Shopify real ₡{realRevenue.toLocaleString('en-US', { minimumFractionDigits: 0 })}</p>
                   </div>
                 </div>
               )
             })() : (
               <div className="text-center py-8">
                 <p className="text-sm text-slate-400">
-                  {needsConnection && needsShopifyConnection ? 'Conecta Meta y Shopify' :
-                   needsConnection ? 'Conecta Meta Ads para ver el blended' :
-                   !shopifyData ? 'Conecta Shopify para ver el blended' :
+                  {!shopifyData ? 'Conecta Shopify para ver el blended' :
                    'Sin campañas con el filtro actual'}
                 </p>
               </div>
