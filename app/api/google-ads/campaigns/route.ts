@@ -72,6 +72,13 @@ export async function GET(request: Request) {
     const accessToken = await getAccessToken()
     const preset = DATE_PRESET_MAP[datePreset] || 'LAST_7_DAYS'
 
+    // Check account currency and set exchange rate
+    const currencyQuery = `SELECT customer.currency_code FROM customer LIMIT 1`
+    const currencyResults = await gaqlQuery(accessToken, customerId, currencyQuery)
+    const accountCurrency = currencyResults[0]?.customer?.currencyCode || 'USD'
+    // Convert USD to CRC at 500 colones per dollar
+    const exchangeRate = accountCurrency === 'USD' ? 500 : 1
+
     // Single query: campaigns + metrics
     const query = `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING ${preset} AND campaign.status != 'REMOVED'`
 
@@ -105,25 +112,30 @@ export async function GET(request: Request) {
       c.conversionsValue += Number(r.metrics?.conversionsValue || 0)
     }
 
-    // Transform to standard format
-    let campaigns = Object.values(campaignMap).map((c: any) => ({
-      name: c.name,
-      status: c.status,
-      budget: c.budget,
-      spend: +c.spend.toFixed(2),
-      impressions: c.impressions,
-      clicks: c.clicks,
-      ctr: c.impressions > 0 ? +((c.clicks / c.impressions) * 100).toFixed(2) : 0,
-      frequency: 0,
-      cpc: c.clicks > 0 ? +(c.spend / c.clicks).toFixed(2) : 0,
-      cpm: c.impressions > 0 ? +((c.spend / c.impressions) * 1000).toFixed(2) : 0,
-      cpa: c.conversions > 0 ? +(c.spend / c.conversions).toFixed(2) : 0,
-      purchases: Math.round(c.conversions),
-      addToCart: 0,
-      initiateCheckout: 0,
-      revenue: +c.conversionsValue.toFixed(2),
-      roas: c.spend > 0 ? +(c.conversionsValue / c.spend).toFixed(2) : 0,
-    }))
+    // Transform to standard format (apply exchange rate to monetary values)
+    let campaigns = Object.values(campaignMap).map((c: any) => {
+      const spend = c.spend * exchangeRate
+      const revenue = c.conversionsValue * exchangeRate
+      const budget = c.budget * exchangeRate
+      return {
+        name: c.name,
+        status: c.status,
+        budget: +budget.toFixed(2),
+        spend: +spend.toFixed(2),
+        impressions: c.impressions,
+        clicks: c.clicks,
+        ctr: c.impressions > 0 ? +((c.clicks / c.impressions) * 100).toFixed(2) : 0,
+        frequency: 0,
+        cpc: c.clicks > 0 ? +(spend / c.clicks).toFixed(2) : 0,
+        cpm: c.impressions > 0 ? +((spend / c.impressions) * 1000).toFixed(2) : 0,
+        cpa: c.conversions > 0 ? +(spend / c.conversions).toFixed(2) : 0,
+        purchases: Math.round(c.conversions),
+        addToCart: 0,
+        initiateCheckout: 0,
+        revenue: +revenue.toFixed(2),
+        roas: spend > 0 ? +(revenue / spend).toFixed(2) : 0,
+      }
+    })
 
     // Filter by status
     if (statusFilter && statusFilter !== 'ALL') {
