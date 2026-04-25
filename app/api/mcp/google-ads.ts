@@ -124,6 +124,30 @@ export const GOOGLE_ADS_TOOLS = [
       },
     },
   },
+  {
+    name: 'get_pmax_asset_groups',
+    description: 'Get asset groups from a Performance Max campaign with their assets (headlines, descriptions, images, videos, logos) and Ad Strength.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID (required) — the PMax campaign to inspect' },
+        customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
+      },
+      required: ['campaign_id'],
+    },
+  },
+  {
+    name: 'get_pmax_audience_signals',
+    description: 'Get audience signals assigned to each asset group in a Performance Max campaign. Returns audience names and descriptions.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID (required) — the PMax campaign to inspect' },
+        customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
+      },
+      required: ['campaign_id'],
+    },
+  },
 ]
 
 // ── Handler implementations ───────────────────────────────────────────
@@ -244,6 +268,143 @@ async function handleGetGoogleCampaignBreakdown(args: any) {
   return { breakdown, total: breakdown.length, date_preset: args.date_preset || 'last_7d', campaign_id: args.campaign_id || 'all' }
 }
 
+async function handleGetPMaxAssetGroups(args: any) {
+  if (!args.campaign_id) throw new Error('campaign_id is required')
+  const accessToken = await getGoogleAdsAccessToken()
+  const customerId = getCustomerId(args.customer_id)
+
+  const query = `SELECT asset_group.id, asset_group.name, asset_group.status, asset_group.ad_strength, asset_group_asset.field_type, asset_group_asset.status, asset.name, asset.type, asset.text_asset.text, asset.image_asset.full_size.url, asset.youtube_video_asset.youtube_video_id FROM asset_group_asset WHERE campaign.id = '${args.campaign_id}'`
+
+  const results = await googleAdsQuery(accessToken, customerId, query)
+
+  // Group by asset group
+  const groupMap: Record<string, any> = {}
+  for (const r of results) {
+    const agId = r.assetGroup?.id
+    if (!agId) continue
+
+    if (!groupMap[agId]) {
+      groupMap[agId] = {
+        id: agId,
+        name: r.assetGroup?.name || 'Unknown',
+        status: r.assetGroup?.status || 'UNKNOWN',
+        ad_strength: r.assetGroup?.adStrength || 'UNKNOWN',
+        assets: {} as Record<string, string[]>,
+      }
+    }
+
+    const fieldType = r.assetGroupAsset?.fieldType
+    if (!fieldType) continue
+
+    if (!groupMap[agId].assets[fieldType]) {
+      groupMap[agId].assets[fieldType] = []
+    }
+
+    // Pick the right asset value based on type
+    const assetType = r.asset?.type
+    let value = ''
+    if (assetType === 'TEXT' || r.asset?.textAsset?.text) {
+      value = r.asset?.textAsset?.text || r.asset?.name || ''
+    } else if (assetType === 'IMAGE' || r.asset?.imageAsset?.fullSize?.url) {
+      value = r.asset?.imageAsset?.fullSize?.url || r.asset?.name || ''
+    } else if (assetType === 'YOUTUBE_VIDEO' || r.asset?.youtubeVideoAsset?.youtubeVideoId) {
+      value = r.asset?.youtubeVideoAsset?.youtubeVideoId || r.asset?.name || ''
+    } else {
+      value = r.asset?.name || r.asset?.type || 'unknown'
+    }
+
+    if (value && !groupMap[agId].assets[fieldType].includes(value)) {
+      groupMap[agId].assets[fieldType].push(value)
+    }
+  }
+
+  const assetGroups = Object.values(groupMap)
+  return { campaign_id: args.campaign_id, asset_groups: assetGroups, total: assetGroups.length }
+}
+
+async function handleGetPMaxAudienceSignals(args: any) {
+  if (!args.campaign_id) throw new Error('campaign_id is required')
+  const accessToken = await getGoogleAdsAccessToken()
+  const customerId = getCustomerId(args.customer_id)
+
+  // Get audience signals per asset group
+  const signalQuery = `SELECT asset_group.id, asset_group.name, asset_group_signal.audience_signal.audiences FROM asset_group_signal WHERE campaign.id = '${args.campaign_id}'`
+
+  let results: any[]
+  try {
+    results = await googleAdsQuery(accessToken, customerId, signalQuery)
+  } catch (err: any) {
+    // asset_group_signal might not exist for some campaigns
+    if (err.message?.includes('not found') || err.message?.includes('INVALID')) {
+      return { campaign_id: args.campaign_id, asset_groups: [], total: 0, note: 'No audience signals found for this campaign' }
+    }
+    throw err
+  }
+
+  // Collect all audience resource names
+  const allAudienceIds = new Set<string>()
+  const groupMap: Record<string, any> = {}
+
+  for (const r of results) {
+    const agId = r.assetGroup?.id
+    if (!agId) continue
+
+    if (!groupMap[agId]) {
+      groupMap[agId] = {
+        id: agId,
+        name: r.assetGroup?.name || 'Unknown',
+        audience_ids: [] as string[],
+      }
+    }
+
+    const audiences = r.assetGroupSignal?.audienceSignal?.audiences || []
+    for (const aud of audiences) {
+      const audienceRef = aud.audience || aud
+      if (typeof audienceRef === 'string') {
+        // Extract ID from resource name like "customers/123/audiences/456"
+        const match = audienceRef.match(/audiences\/(\d+)/)
+        if (match) {
+          allAudienceIds.add(match[1])
+          groupMap[agId].audience_ids.push(match[1])
+        }
+      }
+    }
+  }
+
+  // Resolve audience names
+  const audienceMap: Record<string, { name: string; description: string }> = {}
+  if (allAudienceIds.size > 0) {
+    const ids = Array.from(allAudienceIds).join(',')
+    try {
+      const audQuery = `SELECT audience.id, audience.name, audience.description FROM audience WHERE audience.id IN (${ids})`
+      const audResults = await googleAdsQuery(accessToken, customerId, audQuery)
+      for (const r of audResults) {
+        if (r.audience?.id) {
+          audienceMap[r.audience.id] = {
+            name: r.audience?.name || 'Unknown',
+            description: r.audience?.description || '',
+          }
+        }
+      }
+    } catch {
+      // If audience lookup fails, continue with IDs only
+    }
+  }
+
+  // Build final response
+  const assetGroups = Object.values(groupMap).map((g: any) => ({
+    id: g.id,
+    name: g.name,
+    signals: g.audience_ids.map((id: string) => ({
+      audience_id: id,
+      audience_name: audienceMap[id]?.name || `Audience ${id}`,
+      description: audienceMap[id]?.description || '',
+    })),
+  }))
+
+  return { campaign_id: args.campaign_id, asset_groups: assetGroups, total: assetGroups.length }
+}
+
 // ── Exports ───────────────────────────────────────────────────────────
 
 export const GOOGLE_ADS_HANDLERS: Record<string, (args: any) => Promise<any>> = {
@@ -251,4 +412,6 @@ export const GOOGLE_ADS_HANDLERS: Record<string, (args: any) => Promise<any>> = 
   get_google_insights: handleGetGoogleInsights,
   get_google_keywords: handleGetGoogleKeywords,
   get_google_campaign_breakdown: handleGetGoogleCampaignBreakdown,
+  get_pmax_asset_groups: handleGetPMaxAssetGroups,
+  get_pmax_audience_signals: handleGetPMaxAudienceSignals,
 }
