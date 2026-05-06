@@ -105,12 +105,15 @@ export const TIKTOK_TOOLS = [
   },
   {
     name: 'get_tiktok_ads',
-    description: 'Get ad-level performance insights from TikTok Ads. Returns ad name, campaign name, spend, impressions, clicks, CTR, conversions, and cost per conversion.',
+    description: 'Get ad-level performance insights from TikTok Ads. Returns ad name, campaign name, spend, impressions, clicks, CTR, conversions, and cost per conversion. Supports filtering by campaign_id and pagination.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         advertiser_id: { type: 'string', description: 'TikTok advertiser ID. If omitted, uses env var.' },
+        campaign_id: { type: 'string', description: 'Filter ads by campaign ID. If omitted, returns ads from all campaigns.' },
         date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_14d, last_30d, this_month, last_month', default: 'last_7d' },
+        page: { type: 'number', description: 'Page number for pagination. Default: 1', default: 1 },
+        page_size: { type: 'number', description: 'Results per page (max 1000). Default: 50', default: 50 },
       },
     },
   },
@@ -178,8 +181,16 @@ async function handleGetTikTokAds(args: any) {
   const { accessToken, advertiserId } = getTikTokConfig()
   const advId = args.advertiser_id || advertiserId
   const { start_date, end_date } = getTikTokDateRange(args.date_preset || 'last_7d')
+  const page = args.page || 1
+  const pageSize = args.page_size || 50
 
-  const data = await tiktokFetch(accessToken, 'report/integrated/get/', {
+  // Build filtering object if campaign_id is provided
+  const filtering: Record<string, any> = {}
+  if (args.campaign_id) {
+    filtering.campaign_ids = [args.campaign_id]
+  }
+
+  const params: Record<string, any> = {
     advertiser_id: advId,
     report_type: 'BASIC',
     data_level: 'AUCTION_AD',
@@ -187,7 +198,16 @@ async function handleGetTikTokAds(args: any) {
     metrics: ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion'],
     start_date,
     end_date,
-  })
+    page,
+    page_size: pageSize,
+  }
+
+  // Only add filtering if we have filters
+  if (Object.keys(filtering).length > 0) {
+    params.filtering = filtering
+  }
+
+  const data = await tiktokFetch(accessToken, 'report/integrated/get/', params)
 
   const ads = (data.list || []).map((r: any) => {
     const dims = r.dimensions || {}
@@ -205,7 +225,21 @@ async function handleGetTikTokAds(args: any) {
     }
   })
 
-  return { ads, total: ads.length, date_preset: args.date_preset || 'last_7d' }
+  // Include pagination metadata from TikTok's response
+  const pageInfo = data.page_info || {}
+  const totalInAccount = pageInfo.total_number || ads.length
+  const totalPages = pageInfo.total_page || 1
+
+  return {
+    ads,
+    total: ads.length,
+    total_in_account: totalInAccount,
+    page,
+    page_size: pageSize,
+    total_pages: totalPages,
+    has_more: page < totalPages,
+    date_preset: args.date_preset || 'last_7d',
+  }
 }
 
 // ── Exports ───────────────────────────────────────────────────────────
