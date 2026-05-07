@@ -9,7 +9,7 @@ interface DashboardClientProps {
   user: User
 }
 
-type DatePreset = 'last_7d' | 'last_14d' | 'last_30d'
+type DatePreset = 'last_7d' | 'last_14d' | 'last_30d' | 'custom'
 type StatusFilter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
 type Platform = 'meta' | 'tiktok'
 
@@ -121,6 +121,8 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   const [loading, setLoading] = useState(true)
   const [needsConnection, setNeedsConnection] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
 
   // Shopify state
   const [shopifyData, setShopifyData] = useState<ShopifyData | null>(null)
@@ -243,17 +245,25 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   }, [searchParams])
 
   useEffect(() => { loadAccounts(); loadTiktokAccounts() }, [])
-  useEffect(() => { loadShopifyOrders() }, [datePreset])
+  useEffect(() => {
+    if (datePreset === 'custom' && (!customStartDate || !customEndDate)) return
+    loadShopifyOrders()
+  }, [datePreset, customStartDate, customEndDate])
   useEffect(() => { loadGA4Properties() }, [])
   useEffect(() => {
+    if (datePreset === 'custom' && (!customStartDate || !customEndDate)) return
     if (selectedGA4Property) loadGA4Report()
-  }, [selectedGA4Property, datePreset])
-  useEffect(() => { loadGAdsCampaigns() }, [datePreset, statusFilter])
+  }, [selectedGA4Property, datePreset, customStartDate, customEndDate])
+  useEffect(() => {
+    if (datePreset === 'custom' && (!customStartDate || !customEndDate)) return
+    loadGAdsCampaigns()
+  }, [datePreset, statusFilter, customStartDate, customEndDate])
 
   useEffect(() => {
+    if (datePreset === 'custom' && (!customStartDate || !customEndDate)) return
     if (platform === 'meta' && selectedAccount) loadCampaigns()
     if (selectedTiktokAccount) loadTiktokCampaigns()
-  }, [platform, selectedAccount, selectedTiktokAccount, datePreset, statusFilter])
+  }, [platform, selectedAccount, selectedTiktokAccount, datePreset, statusFilter, customStartDate, customEndDate])
 
   async function loadAccounts() {
     try {
@@ -287,6 +297,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setLoading(true); setError(null)
     try {
       const params = new URLSearchParams({ account_id: selectedAccount, date_preset: datePreset, status: statusFilter })
+      if (datePreset === 'custom' && customStartDate && customEndDate) {
+        params.set('start_date', customStartDate)
+        params.set('end_date', customEndDate)
+      }
       const response = await fetch(`/api/meta/campaigns?${params}`)
       const data = await response.json()
       if (data.success) { setCampaigns(data.data); setCurrency(data.currency || 'USD') }
@@ -300,6 +314,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setTiktokLoading(true); setError(null)
     try {
       const params = new URLSearchParams({ advertiser_id: selectedTiktokAccount, date_preset: datePreset, status: statusFilter })
+      if (datePreset === 'custom' && customStartDate && customEndDate) {
+        params.set('start_date', customStartDate)
+        params.set('end_date', customEndDate)
+      }
       const response = await fetch(`/api/tiktok/campaigns?${params}`)
       const data = await response.json()
       if (data.success) {
@@ -317,6 +335,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setGAdsLoading(true)
     try {
       const params = new URLSearchParams({ date_preset: datePreset, status: statusFilter })
+      if (datePreset === 'custom' && customStartDate && customEndDate) {
+        params.set('start_date', customStartDate)
+        params.set('end_date', customEndDate)
+      }
       const res = await fetch(`/api/google-ads/campaigns?${params}`)
       const data = await res.json()
       if (data.success) {
@@ -334,7 +356,12 @@ export default function DashboardClient({ user }: DashboardClientProps) {
   async function loadShopifyOrders() {
     setShopifyLoading(true)
     try {
-      const res = await fetch(`/api/shopify/orders?date_preset=${datePreset}`)
+      const shopifyParams = new URLSearchParams({ date_preset: datePreset })
+      if (datePreset === 'custom' && customStartDate && customEndDate) {
+        shopifyParams.set('start_date', customStartDate)
+        shopifyParams.set('end_date', customEndDate)
+      }
+      const res = await fetch(`/api/shopify/orders?${shopifyParams}`)
       const data = await res.json()
       if (data.success) {
         setShopifyData(data)
@@ -366,6 +393,10 @@ export default function DashboardClient({ user }: DashboardClientProps) {
     setGa4Loading(true)
     try {
       const params = new URLSearchParams({ property_id: selectedGA4Property, date_preset: datePreset })
+      if (datePreset === 'custom' && customStartDate && customEndDate) {
+        params.set('start_date', customStartDate)
+        params.set('end_date', customEndDate)
+      }
       const res = await fetch(`/api/google-analytics/report?${params}`)
       const data = await res.json()
       if (data.success) {
@@ -640,6 +671,26 @@ export default function DashboardClient({ user }: DashboardClientProps) {
                     {preset === 'last_7d' ? '7 días' : preset === 'last_14d' ? '14 días' : '30 días'}
                   </button>
                 ))}
+                <button onClick={() => {
+                  const end = new Date()
+                  const start = new Date()
+                  start.setDate(start.getDate() - 7)
+                  setDatePreset('custom')
+                  setCustomStartDate(start.toISOString().slice(0, 10))
+                  setCustomEndDate(end.toISOString().slice(0, 10))
+                }}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${datePreset === 'custom' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  Personalizado
+                </button>
+                {datePreset === 'custom' && (
+                  <div className="flex items-center gap-2 ml-1">
+                    <input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="px-2 py-1 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    <span className="text-slate-400 text-sm">→</span>
+                    <input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="px-2 py-1 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                  </div>
+                )}
               </div>
             </div>
             {!currentNeedsConnection && (
@@ -1027,7 +1078,7 @@ export default function DashboardClient({ user }: DashboardClientProps) {
         <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm mb-6">
           <div className="px-6 py-4 border-b border-slate-100">
             <h2 className="text-lg font-bold text-slate-900">Campañas</h2>
-            <p className="text-xs text-slate-400 mt-0.5">{filteredCampaigns.length} campañas · {datePreset === 'last_7d' ? 'Últimos 7 días' : datePreset === 'last_14d' ? 'Últimos 14 días' : 'Últimos 30 días'}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{filteredCampaigns.length} campañas · {datePreset === 'last_7d' ? 'Últimos 7 días' : datePreset === 'last_14d' ? 'Últimos 14 días' : datePreset === 'last_30d' ? 'Últimos 30 días' : `${customStartDate} — ${customEndDate}`}</p>
           </div>
           {loading ? (
             <div className="p-16 text-center">
