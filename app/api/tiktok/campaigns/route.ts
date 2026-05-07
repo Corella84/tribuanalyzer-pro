@@ -32,6 +32,8 @@ export async function GET(request: Request) {
   const advertiserId = searchParams.get('advertiser_id')
   const datePreset = searchParams.get('date_preset') || 'last_7d'
   const statusFilter = searchParams.get('status')
+  const customStartDate = searchParams.get('start_date')
+  const customEndDate = searchParams.get('end_date')
 
   try {
     const supabase = await createClient()
@@ -73,8 +75,9 @@ export async function GET(request: Request) {
       }, { status: 400 })
     }
 
-    // Use reporting endpoint only (works with Reporting scope, no Ads Management needed)
-    const { start, end } = getDateRange(datePreset)
+    // Use custom dates if provided, otherwise calculate from preset
+    const start = customStartDate || getDateRange(datePreset).start
+    const end = customEndDate || getDateRange(datePreset).end
 
     const dimensions = encodeURIComponent(JSON.stringify(['campaign_id']))
     const metrics = encodeURIComponent(JSON.stringify([
