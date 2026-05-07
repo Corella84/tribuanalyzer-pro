@@ -9,6 +9,8 @@ export async function GET(request: Request) {
   const accountId = searchParams.get('account_id')
   const datePreset = searchParams.get('date_preset') || 'last_7d'
   const status = searchParams.get('status')
+  const startDate = searchParams.get('start_date')
+  const endDate = searchParams.get('end_date')
 
   try {
     const supabase = await createClient()
@@ -64,6 +66,11 @@ export async function GET(request: Request) {
       campaigns = campaigns.filter((c: any) => c.status === status)
     }
 
+    // Build date param for insights: use time_range for custom dates, date_preset otherwise
+    const dateParam = startDate && endDate
+      ? `time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}`
+      : `date_preset=${datePreset}`
+
     // Get insights for each campaign
     const campaignsWithInsights = await Promise.all(
       campaigns.map(async (campaign: any) => {
@@ -73,7 +80,7 @@ export async function GET(request: Request) {
         const budget = dailyBudget || lifetimeBudget
 
         try {
-          const insightsUrl = `${BASE_URL}/${campaign.id}/insights?access_token=${accessToken}&fields=campaign_name,spend,impressions,clicks,ctr,frequency,actions,action_values&date_preset=${datePreset}`
+          const insightsUrl = `${BASE_URL}/${campaign.id}/insights?access_token=${accessToken}&fields=campaign_name,spend,impressions,clicks,ctr,frequency,actions,action_values&${dateParam}`
 
           const insightsResponse = await fetch(insightsUrl, {
             signal: AbortSignal.timeout(5000)
