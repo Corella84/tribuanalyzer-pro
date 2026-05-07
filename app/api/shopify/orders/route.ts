@@ -24,6 +24,8 @@ async function refreshShopifyToken(shop: string): Promise<string | null> {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const datePreset = searchParams.get('date_preset') || 'last_7d'
+  const customStartDate = searchParams.get('start_date')
+  const customEndDate = searchParams.get('end_date')
 
   try {
     const supabase = await createClient()
@@ -59,11 +61,19 @@ export async function GET(request: Request) {
       }
     }
 
-    // Calculate date range
-    const now = new Date()
-    const days = datePreset === 'last_7d' ? 7 : datePreset === 'last_14d' ? 14 : 30
-    const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
-    const sinceStr = since.toISOString()
+    // Calculate date range: use custom dates or calculate from preset
+    let sinceStr: string
+    let untilStr: string | undefined
+
+    if (customStartDate && customEndDate) {
+      sinceStr = new Date(customStartDate + 'T00:00:00Z').toISOString()
+      untilStr = new Date(customEndDate + 'T23:59:59Z').toISOString()
+    } else {
+      const now = new Date()
+      const days = datePreset === 'last_7d' ? 7 : datePreset === 'last_14d' ? 14 : 30
+      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+      sinceStr = since.toISOString()
+    }
 
     // Fetch orders from Shopify
     const url = new URL(
@@ -71,6 +81,9 @@ export async function GET(request: Request) {
     )
     url.searchParams.set('status', 'any')
     url.searchParams.set('created_at_min', sinceStr)
+    if (untilStr) {
+      url.searchParams.set('created_at_max', untilStr)
+    }
     url.searchParams.set('limit', '250')
     url.searchParams.set('fields', 'id,name,created_at,total_price,subtotal_price,financial_status,line_items,source_name,referring_site,landing_site')
 
