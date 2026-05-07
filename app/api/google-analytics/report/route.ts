@@ -27,6 +27,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const propertyId = searchParams.get('property_id')
   const datePreset = searchParams.get('date_preset') || 'last_7d'
+  const customStartDate = searchParams.get('start_date')
+  const customEndDate = searchParams.get('end_date')
 
   try {
     const supabase = await createClient()
@@ -70,9 +72,18 @@ export async function GET(request: Request) {
       }
     }
 
-    // Date range based on preset
-    const startDate = datePreset === 'last_7d' ? '7daysAgo'
-      : datePreset === 'last_14d' ? '14daysAgo' : '30daysAgo'
+    // Date range: use custom dates or calculate from preset
+    let startDate: string
+    let endDate: string
+
+    if (customStartDate && customEndDate) {
+      startDate = customStartDate
+      endDate = customEndDate
+    } else {
+      startDate = datePreset === 'last_7d' ? '7daysAgo'
+        : datePreset === 'last_14d' ? '14daysAgo' : '30daysAgo'
+      endDate = 'today'
+    }
 
     // Extract numeric property ID from "properties/XXXXXXX"
     const numericPropertyId = selectedProperty.replace('properties/', '')
@@ -121,7 +132,7 @@ export async function GET(request: Request) {
     const [overviewData, trafficData] = await Promise.all([
       // Overview - totals without dimensions
       fetchReport({
-        dateRanges: [{ startDate, endDate: 'today' }],
+        dateRanges: [{ startDate, endDate }],
         metrics: [
           { name: 'sessions' },
           { name: 'totalUsers' },
@@ -136,7 +147,7 @@ export async function GET(request: Request) {
       }),
       // Traffic Sources - with dimensions
       fetchReport({
-        dateRanges: [{ startDate, endDate: 'today' }],
+        dateRanges: [{ startDate, endDate }],
         dimensions: [
           { name: 'sessionSource' },
           { name: 'sessionMedium' },
