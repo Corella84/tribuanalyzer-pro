@@ -62,6 +62,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const datePreset = searchParams.get('date_preset') || 'last_7d'
   const statusFilter = searchParams.get('status')
+  const startDate = searchParams.get('start_date')
+  const endDate = searchParams.get('end_date')
 
   try {
     const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID?.trim()?.replace(/-/g, '')
@@ -70,7 +72,11 @@ export async function GET(request: Request) {
     }
 
     const accessToken = await getAccessToken()
-    const preset = DATE_PRESET_MAP[datePreset] || 'LAST_7_DAYS'
+
+    // Build date filter: custom range or preset
+    const dateFilter = startDate && endDate
+      ? `segments.date BETWEEN '${startDate}' AND '${endDate}'`
+      : `segments.date DURING ${DATE_PRESET_MAP[datePreset] || 'LAST_7_DAYS'}`
 
     // Check account currency and set exchange rate
     const currencyQuery = `SELECT customer.currency_code FROM customer LIMIT 1`
@@ -80,7 +86,7 @@ export async function GET(request: Request) {
     const exchangeRate = accountCurrency === 'USD' ? 500 : 1
 
     // Single query: campaigns + metrics
-    const query = `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING ${preset} AND campaign.status != 'REMOVED'`
+    const query = `SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE ${dateFilter} AND campaign.status != 'REMOVED'`
 
     const results = await gaqlQuery(accessToken, customerId, query)
 
