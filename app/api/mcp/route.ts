@@ -8,14 +8,15 @@ const META_API_VERSION = 'v21.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
 
 // ── CORS ──────────────────────────────────────────────────────────────
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-mcp-secret',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-mcp-secret, Mcp-Session-Id',
+  'Access-Control-Expose-Headers': 'Mcp-Session-Id',
 }
 
-function corsJson(body: any, status = 200) {
-  return NextResponse.json(body, { status, headers: CORS_HEADERS })
+function corsJson(body: any, status = 200, extraHeaders: Record<string, string> = {}) {
+  return NextResponse.json(body, { status, headers: { ...CORS_HEADERS, ...extraHeaders } })
 }
 
 // ── Meta API helper ───────────────────────────────────────────────────
@@ -1804,20 +1805,31 @@ function jsonrpcError(id: string | number | null, code: number, message: string)
   return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
+// ── MCP Session ID ────────────────────────────────────────────────────
+let mcpSessionId: string | null = null
+
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05']
+
 // ── MCP Protocol handler ──────────────────────────────────────────────
 async function handleMcpMessage(msg: any) {
   const { method, params, id } = msg
 
   switch (method) {
-    case 'initialize':
+    case 'initialize': {
+      const clientVersion = params?.protocolVersion
+      const negotiatedVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(clientVersion)
+        ? clientVersion
+        : SUPPORTED_PROTOCOL_VERSIONS[0]
+      mcpSessionId = crypto.randomUUID()
       return jsonrpc(id, {
-        protocolVersion: '2024-11-05',
+        protocolVersion: negotiatedVersion,
         capabilities: { tools: {} },
         serverInfo: {
           name: 'tribuanalyzer-pro',
           version: '1.0.0',
         },
       })
+    }
 
     case 'notifications/initialized':
       return null // no response needed for notifications
@@ -1969,8 +1981,12 @@ async function handleMcpMessage(msg: any) {
 }
 
 // ── HTTP handlers ─────────────────────────────────────────────────────
+function sessionHeaders(): Record<string, string> {
+  return mcpSessionId ? { 'Mcp-Session-Id': mcpSessionId } : {}
+}
+
 export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+  return new NextResponse(null, { status: 204, headers: { ...CORS_HEADERS, ...sessionHeaders() } })
 }
 
 export async function POST(request: NextRequest) {
@@ -1980,28 +1996,30 @@ export async function POST(request: NextRequest) {
     // Handle batch requests
     if (Array.isArray(body)) {
       const results = await Promise.all(body.map(handleMcpMessage))
-      return corsJson(results.filter(Boolean))
+      return corsJson(results.filter(Boolean), 200, sessionHeaders())
     }
 
     const result = await handleMcpMessage(body)
     if (!result) {
-      return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+      return new NextResponse(null, { status: 204, headers: { ...CORS_HEADERS, ...sessionHeaders() } })
     }
-    return corsJson(result)
+    return corsJson(result, 200, sessionHeaders())
   } catch (err: any) {
     return corsJson(
       jsonrpcError(null, -32700, `Parse error: ${err.message}`),
-      400
+      400,
+      sessionHeaders()
     )
   }
 }
 
 export async function GET(_request: NextRequest) {
   return corsJson({
-    name: 'tribuanalyzer-meta-ads',
+    name: 'tribuanalyzer-pro',
     version: '1.0.0',
-    protocol: 'MCP 2024-11-05',
-    tools: TOOLS.map(t => t.name),
+    protocol: 'MCP',
+    description: 'MCP endpoint — use POST with JSON-RPC 2.0 messages',
+    supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
     status: 'ok',
-  })
+  }, 200, sessionHeaders())
 }
