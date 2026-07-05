@@ -56,6 +56,27 @@ async function tiktokFetch(accessToken: string, endpoint: string, params: Record
   return data.data
 }
 
+async function tiktokPost(accessToken: string, endpoint: string, body: Record<string, any>): Promise<any> {
+  const url = `${TIKTOK_API_BASE}/${endpoint}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Access-Token': accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
+  })
+
+  const data = await res.json()
+  if (data.code !== 0) {
+    throw new Error(`TikTok API: ${data.message} (code ${data.code})`)
+  }
+
+  return data.data
+}
+
 function getTikTokDateRange(preset: string): { start_date: string; end_date: string } {
   const now = new Date()
   const fmt = (d: Date) => d.toISOString().slice(0, 10)
@@ -137,6 +158,20 @@ export const TIKTOK_TOOLS = [
         page: { type: 'number', description: 'Page number for pagination. Default: 1', default: 1 },
         page_size: { type: 'number', description: 'Results per page (max 1000). Default: 50', default: 50 },
       },
+    },
+  },
+  {
+    name: 'update_tiktok_campaign',
+    description: 'Update a TikTok Ads campaign. Can change daily budget and/or status (ENABLE/DISABLE). Returns the confirmed state of the campaign after the update.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        advertiser_id: { type: 'string', description: 'TikTok advertiser ID. If omitted, uses env var.' },
+        campaign_id: { type: 'string', description: 'Campaign ID to update.' },
+        daily_budget: { type: 'number', description: 'New daily budget in the advertiser currency (e.g. 50.00). Must be > 0.' },
+        status: { type: 'string', description: 'New status: ENABLE or DISABLE.' },
+      },
+      required: ['campaign_id'],
     },
   },
 ]
@@ -271,10 +306,58 @@ async function handleGetTikTokAds(args: any) {
   }
 }
 
+async function handleUpdateTikTokCampaign(args: any) {
+  const { accessToken, advertiserId } = getTikTokConfig()
+  const advId = args.advertiser_id || advertiserId
+
+  if (!args.campaign_id) return { error: 'campaign_id is required.' }
+  if (args.daily_budget === undefined && args.status === undefined) {
+    return { error: 'Nothing to update. Provide daily_budget and/or status.' }
+  }
+  if (args.status !== undefined && args.status !== 'ENABLE' && args.status !== 'DISABLE') {
+    return { error: `Invalid status "${args.status}". Must be ENABLE or DISABLE.` }
+  }
+  if (args.daily_budget !== undefined && (typeof args.daily_budget !== 'number' || args.daily_budget <= 0)) {
+    return { error: `daily_budget must be a positive number, got: ${args.daily_budget}` }
+  }
+
+  const body: Record<string, any> = {
+    advertiser_id: advId,
+    campaign_id: args.campaign_id,
+  }
+  if (args.daily_budget !== undefined) body.budget = args.daily_budget
+  if (args.status !== undefined) body.operation_status = args.status
+
+  await tiktokPost(accessToken, 'campaign/update/', body)
+
+  // Re-read the campaign to confirm the change
+  const readData = await tiktokFetch(accessToken, 'campaign/get/', {
+    advertiser_id: advId,
+    filtering: { campaign_ids: [args.campaign_id] },
+  })
+
+  const campaign = (readData.list || [])[0]
+  if (!campaign) return { error: `Campaign ${args.campaign_id} not found after update.` }
+
+  return {
+    campaign_id: campaign.campaign_id,
+    campaign_name: campaign.campaign_name,
+    status: campaign.operation_status || campaign.status,
+    budget: campaign.budget,
+    budget_mode: campaign.budget_mode,
+    objective_type: campaign.objective_type,
+    updated_fields: [
+      ...(args.daily_budget !== undefined ? ['budget'] : []),
+      ...(args.status !== undefined ? ['status'] : []),
+    ],
+  }
+}
+
 // ── Exports ───────────────────────────────────────────────────────────
 
 export const TIKTOK_HANDLERS: Record<string, (args: any) => Promise<any>> = {
   get_tiktok_campaigns: handleGetTikTokCampaigns,
   get_tiktok_insights: handleGetTikTokInsights,
   get_tiktok_ads: handleGetTikTokAds,
+  update_tiktok_campaign: handleUpdateTikTokCampaign,
 }
