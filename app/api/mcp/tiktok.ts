@@ -2,6 +2,26 @@
 
 const TIKTOK_API_BASE = 'https://business-api.tiktok.com/open_api/v1.3'
 
+// ── Date validation helper ────────────────────────────────────────────
+
+function validateCustomDateRange(start_date?: string, end_date?: string): { valid: true } | { valid: false; error: string } {
+  if (start_date && !end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided start_date but not end_date.' }
+  if (!start_date && end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided end_date but not start_date.' }
+  if (!start_date && !end_date) return { valid: true }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+  if (!dateRegex.test(start_date!)) return { valid: false, error: `Invalid start_date format: "${start_date}". Must be YYYY-MM-DD.` }
+  if (!dateRegex.test(end_date!)) return { valid: false, error: `Invalid end_date format: "${end_date}". Must be YYYY-MM-DD.` }
+
+  const s = new Date(start_date!)
+  const e = new Date(end_date!)
+  if (isNaN(s.getTime())) return { valid: false, error: `Invalid start_date: "${start_date}" is not a valid date.` }
+  if (isNaN(e.getTime())) return { valid: false, error: `Invalid end_date: "${end_date}" is not a valid date.` }
+  if (s > e) return { valid: false, error: `start_date (${start_date}) must be <= end_date (${end_date}).` }
+
+  return { valid: true }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function getTikTokConfig(): { accessToken: string; advertiserId: string } {
@@ -99,7 +119,9 @@ export const TIKTOK_TOOLS = [
       type: 'object' as const,
       properties: {
         advertiser_id: { type: 'string', description: 'TikTok advertiser ID. If omitted, uses env var.' },
-        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_14d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_14d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
     },
   },
@@ -143,9 +165,16 @@ async function handleGetTikTokCampaigns(args: any) {
 }
 
 async function handleGetTikTokInsights(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const { accessToken, advertiserId } = getTikTokConfig()
   const advId = args.advertiser_id || advertiserId
-  const { start_date, end_date } = getTikTokDateRange(args.date_preset || 'last_7d')
+
+  const useCustomRange = args.start_date && args.end_date
+  const { start_date, end_date } = useCustomRange
+    ? { start_date: args.start_date, end_date: args.end_date }
+    : getTikTokDateRange(args.date_preset || 'last_7d')
 
   const data = await tiktokFetch(accessToken, 'report/integrated/get/', {
     advertiser_id: advId,
@@ -174,7 +203,7 @@ async function handleGetTikTokInsights(args: any) {
     }
   })
 
-  return { insights, total: insights.length, date_preset: args.date_preset || 'last_7d' }
+  return { insights, total: insights.length, ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }) }
 }
 
 async function handleGetTikTokAds(args: any) {

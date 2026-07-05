@@ -19,6 +19,26 @@ function corsJson(body: any, status = 200, extraHeaders: Record<string, string> 
   return NextResponse.json(body, { status, headers: { ...CORS_HEADERS, ...extraHeaders } })
 }
 
+// ── Date validation helper ────────────────────────────────────────────
+
+function validateCustomDateRange(start_date?: string, end_date?: string): { valid: true } | { valid: false; error: string } {
+  if (start_date && !end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided start_date but not end_date.' }
+  if (!start_date && end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided end_date but not start_date.' }
+  if (!start_date && !end_date) return { valid: true }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+  if (!dateRegex.test(start_date!)) return { valid: false, error: `Invalid start_date format: "${start_date}". Must be YYYY-MM-DD.` }
+  if (!dateRegex.test(end_date!)) return { valid: false, error: `Invalid end_date format: "${end_date}". Must be YYYY-MM-DD.` }
+
+  const s = new Date(start_date!)
+  const e = new Date(end_date!)
+  if (isNaN(s.getTime())) return { valid: false, error: `Invalid start_date: "${start_date}" is not a valid date.` }
+  if (isNaN(e.getTime())) return { valid: false, error: `Invalid end_date: "${end_date}" is not a valid date.` }
+  if (s > e) return { valid: false, error: `start_date (${start_date}) must be <= end_date (${end_date}).` }
+
+  return { valid: true }
+}
+
 // ── Meta API helper ───────────────────────────────────────────────────
 async function metaFetch(token: string, path: string, params: Record<string, string> = {}) {
   const url = new URL(`${BASE_URL}/${path}`)
@@ -149,8 +169,10 @@ const TOOLS = [
       type: 'object' as const,
       properties: {
         campaign_id: { type: 'string', description: 'Campaign ID' },
-        date_preset: { type: 'string', description: 'Date preset: today, yesterday, last_7d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date preset: today, yesterday, last_7d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
         time_increment: { type: 'string', description: 'Break down by day: "1" for daily, "monthly", or omit for aggregate' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
       required: ['campaign_id'],
     },
@@ -333,10 +355,12 @@ const TOOLS = [
       properties: {
         object_id: { type: 'string', description: 'Any Meta object ID (campaign, adset, ad, or act_xxx)' },
         fields: { type: 'string', description: 'Comma-separated fields (default: spend,impressions,clicks,ctr,cpc,cpm,actions,action_values)' },
-        date_preset: { type: 'string', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date preset. Ignored if start_date/end_date are provided.', default: 'last_7d' },
         time_increment: { type: 'string', description: '"1" for daily, "monthly", or omit for aggregate' },
         breakdowns: { type: 'string', description: 'e.g. age, gender, country, publisher_platform' },
         level: { type: 'string', description: 'Aggregation level: ad, adset, campaign, account' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
       required: ['object_id'],
     },
@@ -811,11 +835,19 @@ async function handleGetCampaigns(token: string, args: any) {
 }
 
 async function handleGetCampaignInsights(token: string, args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const { campaign_id, date_preset = 'last_7d', time_increment } = args
+  const useCustomRange = args.start_date && args.end_date
 
   const params: Record<string, string> = {
     fields: 'campaign_name,spend,impressions,clicks,ctr,cpc,cpm,frequency,reach,actions,action_values,cost_per_action_type',
-    date_preset,
+  }
+  if (useCustomRange) {
+    params.time_range = JSON.stringify({ since: args.start_date, until: args.end_date })
+  } else {
+    params.date_preset = date_preset
   }
   if (time_increment) params.time_increment = time_increment
 
@@ -850,7 +882,7 @@ async function handleGetCampaignInsights(token: string, args: any) {
     }
   })
 
-  return { insights, total: insights.length, date_preset }
+  return { insights, total: insights.length, ...(useCustomRange ? { start_date: args.start_date, end_date: args.end_date } : { date_preset }) }
 }
 
 async function handleGetAdsets(token: string, args: any) {
@@ -1095,15 +1127,23 @@ async function handleGetAdVideo(token: string, args: any) {
 }
 
 async function handleGetInsights(token: string, args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
+  const useCustomRange = args.start_date && args.end_date
   const params: Record<string, string> = {
     fields: args.fields || 'spend,impressions,clicks,ctr,cpc,cpm,actions,action_values',
-    date_preset: args.date_preset || 'last_7d',
+  }
+  if (useCustomRange) {
+    params.time_range = JSON.stringify({ since: args.start_date, until: args.end_date })
+  } else {
+    params.date_preset = args.date_preset || 'last_7d'
   }
   if (args.time_increment) params.time_increment = args.time_increment
   if (args.breakdowns) params.breakdowns = args.breakdowns
   if (args.level) params.level = args.level
   const data = await metaFetch(token, `${args.object_id}/insights`, params)
-  return { insights: data.data || [], total: (data.data || []).length }
+  return { insights: data.data || [], total: (data.data || []).length, ...(useCustomRange ? { start_date: args.start_date, end_date: args.end_date } : { date_preset: args.date_preset || 'last_7d' }) }
 }
 
 async function handleGetLeadGenForms(token: string, args: any) {

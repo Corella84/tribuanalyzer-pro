@@ -12,6 +12,26 @@ const DATE_PRESET_MAP: Record<string, string> = {
   last_month: 'LAST_MONTH',
 }
 
+// ── Date validation helper ────────────────────────────────────────────
+
+function validateCustomDateRange(start_date?: string, end_date?: string): { valid: true } | { valid: false; error: string } {
+  if (start_date && !end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided start_date but not end_date.' }
+  if (!start_date && end_date) return { valid: false, error: 'Both start_date and end_date are required. You provided end_date but not start_date.' }
+  if (!start_date && !end_date) return { valid: true }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+  if (!dateRegex.test(start_date!)) return { valid: false, error: `Invalid start_date format: "${start_date}". Must be YYYY-MM-DD.` }
+  if (!dateRegex.test(end_date!)) return { valid: false, error: `Invalid end_date format: "${end_date}". Must be YYYY-MM-DD.` }
+
+  const s = new Date(start_date!)
+  const e = new Date(end_date!)
+  if (isNaN(s.getTime())) return { valid: false, error: `Invalid start_date: "${start_date}" is not a valid date.` }
+  if (isNaN(e.getTime())) return { valid: false, error: `Invalid end_date: "${end_date}" is not a valid date.` }
+  if (s > e) return { valid: false, error: `start_date (${start_date}) must be <= end_date (${end_date}).` }
+
+  return { valid: true }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 async function getGoogleAdsAccessToken(): Promise<string> {
@@ -96,7 +116,9 @@ export const GOOGLE_ADS_TOOLS = [
       type: 'object' as const,
       properties: {
         customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
-        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
     },
   },
@@ -107,8 +129,10 @@ export const GOOGLE_ADS_TOOLS = [
       type: 'object' as const,
       properties: {
         customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
-        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
         campaign_id: { type: 'string', description: 'Filter by campaign ID (optional)' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
     },
   },
@@ -120,7 +144,9 @@ export const GOOGLE_ADS_TOOLS = [
       properties: {
         customer_id: { type: 'string', description: 'Google Ads customer ID. If omitted, uses env var.' },
         campaign_id: { type: 'string', description: 'Campaign ID to break down (optional — if omitted, all campaigns)' },
-        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
       },
     },
   },
@@ -170,11 +196,18 @@ async function handleGetGoogleCampaigns(args: any) {
 }
 
 async function handleGetGoogleInsights(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const accessToken = await getGoogleAdsAccessToken()
   const customerId = getCustomerId(args.customer_id)
-  const preset = DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'
 
-  const query = `SELECT campaign.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING ${preset} AND campaign.status != 'REMOVED'`
+  const useCustomRange = args.start_date && args.end_date
+  const dateClause = useCustomRange
+    ? `segments.date BETWEEN '${args.start_date}' AND '${args.end_date}'`
+    : `segments.date DURING ${DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'}`
+
+  const query = `SELECT campaign.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE ${dateClause} AND campaign.status != 'REMOVED'`
   const results = await googleAdsQuery(accessToken, customerId, query)
 
   const insights = results.map((r: any) => {
@@ -198,15 +231,22 @@ async function handleGetGoogleInsights(args: any) {
     }
   })
 
-  return { insights, total: insights.length, date_preset: args.date_preset || 'last_7d' }
+  return { insights, total: insights.length, ...(useCustomRange ? { start_date: args.start_date, end_date: args.end_date } : { date_preset: args.date_preset || 'last_7d' }) }
 }
 
 async function handleGetGoogleKeywords(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const accessToken = await getGoogleAdsAccessToken()
   const customerId = getCustomerId(args.customer_id)
-  const preset = DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'
 
-  let query = `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, campaign.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM keyword_view WHERE segments.date DURING ${preset}`
+  const useCustomRange = args.start_date && args.end_date
+  const dateClause = useCustomRange
+    ? `segments.date BETWEEN '${args.start_date}' AND '${args.end_date}'`
+    : `segments.date DURING ${DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'}`
+
+  let query = `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, campaign.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM keyword_view WHERE ${dateClause}`
   if (args.campaign_id) {
     query += ` AND campaign.id = ${args.campaign_id}`
   }
@@ -230,15 +270,22 @@ async function handleGetGoogleKeywords(args: any) {
     }
   })
 
-  return { keywords, total: keywords.length, date_preset: args.date_preset || 'last_7d' }
+  return { keywords, total: keywords.length, ...(useCustomRange ? { start_date: args.start_date, end_date: args.end_date } : { date_preset: args.date_preset || 'last_7d' }) }
 }
 
 async function handleGetGoogleCampaignBreakdown(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const accessToken = await getGoogleAdsAccessToken()
   const customerId = getCustomerId(args.customer_id)
-  const preset = DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'
 
-  let query = `SELECT segments.ad_network_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date DURING ${preset} AND campaign.status != 'REMOVED'`
+  const useCustomRange = args.start_date && args.end_date
+  const dateClause = useCustomRange
+    ? `segments.date BETWEEN '${args.start_date}' AND '${args.end_date}'`
+    : `segments.date DURING ${DATE_PRESET_MAP[args.date_preset || 'last_7d'] || 'LAST_7_DAYS'}`
+
+  let query = `SELECT segments.ad_network_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign WHERE ${dateClause} AND campaign.status != 'REMOVED'`
   if (args.campaign_id) {
     query += ` AND campaign.id = ${args.campaign_id}`
   }
@@ -265,7 +312,7 @@ async function handleGetGoogleCampaignBreakdown(args: any) {
     }
   })
 
-  return { breakdown, total: breakdown.length, date_preset: args.date_preset || 'last_7d', campaign_id: args.campaign_id || 'all' }
+  return { breakdown, total: breakdown.length, ...(useCustomRange ? { start_date: args.start_date, end_date: args.end_date } : { date_preset: args.date_preset || 'last_7d' }), campaign_id: args.campaign_id || 'all' }
 }
 
 async function handleGetPMaxAssetGroups(args: any) {
