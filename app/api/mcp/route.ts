@@ -56,6 +56,28 @@ async function metaFetch(token: string, path: string, params: Record<string, str
   return data
 }
 
+// ── Account currency cache (persists across warm invocations) ─────────
+const accountCurrencyCache = new Map<string, { currency: string; offset: number }>()
+
+async function getAccountCurrencyInfo(token: string, accountId: string): Promise<{ currency: string; offset: number }> {
+  const cached = accountCurrencyCache.get(accountId)
+  if (cached) return cached
+
+  const data = await metaFetch(token, accountId, { fields: 'currency,currency_offset' })
+  const info = {
+    currency: data.currency || 'USD',
+    offset: parseInt(data.currency_offset) || 100,
+  }
+  accountCurrencyCache.set(accountId, info)
+  return info
+}
+
+async function resolveAccountId(token: string, objectId: string): Promise<string> {
+  if (objectId.startsWith('act_')) return objectId
+  const data = await metaFetch(token, objectId, { fields: 'account_id' })
+  return data.account_id ? `act_${data.account_id}` : ''
+}
+
 // ── Meta API POST helper (create/update) ─────────────────────────────
 async function metaPost(token: string, path: string, body: Record<string, any> = {}) {
   const url = `${BASE_URL}/${path}`
@@ -787,6 +809,8 @@ async function handleGetAdAccounts(token: string) {
 async function handleGetCampaigns(token: string, args: any) {
   const { account_id, status_filter = 'ALL', date_preset = 'last_7d' } = args
 
+  const { currency, offset } = await getAccountCurrencyInfo(token, account_id)
+
   const data = await metaFetch(token, `${account_id}/campaigns`, {
     fields: 'id,name,status,objective,daily_budget,lifetime_budget',
     limit: '100',
@@ -799,8 +823,8 @@ async function handleGetCampaigns(token: string, args: any) {
 
   const results = await Promise.all(
     campaigns.map(async (c: any) => {
-      const dailyBudget = c.daily_budget ? parseFloat(c.daily_budget) / 100 : 0
-      const lifetimeBudget = c.lifetime_budget ? parseFloat(c.lifetime_budget) / 100 : 0
+      const dailyBudget = c.daily_budget ? parseFloat(c.daily_budget) / offset : 0
+      const lifetimeBudget = c.lifetime_budget ? parseFloat(c.lifetime_budget) / offset : 0
 
       let insights: any = {}
       try {
@@ -819,8 +843,9 @@ async function handleGetCampaigns(token: string, args: any) {
         name: c.name,
         status: c.status,
         objective: c.objective,
-        budget: dailyBudget || lifetimeBudget,
+        budget: +(dailyBudget || lifetimeBudget).toFixed(2),
         budget_type: dailyBudget ? 'daily' : 'lifetime',
+        budget_currency: currency,
         spend,
         impressions: parseInt(insights.impressions || '0'),
         clicks: parseInt(insights.clicks || '0'),
@@ -831,7 +856,7 @@ async function handleGetCampaigns(token: string, args: any) {
     })
   )
 
-  return { campaigns: results, total: results.length, date_preset }
+  return { campaigns: results, total: results.length, date_preset, currency }
 }
 
 async function handleGetCampaignInsights(token: string, args: any) {
@@ -888,6 +913,11 @@ async function handleGetCampaignInsights(token: string, args: any) {
 async function handleGetAdsets(token: string, args: any) {
   const { parent_id, date_preset = 'last_7d' } = args
 
+  const accountId = await resolveAccountId(token, parent_id)
+  const { currency, offset } = accountId
+    ? await getAccountCurrencyInfo(token, accountId)
+    : { currency: 'USD', offset: 100 }
+
   const data = await metaFetch(token, `${parent_id}/adsets`, {
     fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,targeting',
     limit: '100',
@@ -895,8 +925,8 @@ async function handleGetAdsets(token: string, args: any) {
 
   const adsets = await Promise.all(
     (data.data || []).map(async (as: any) => {
-      const dailyBudget = as.daily_budget ? parseFloat(as.daily_budget) / 100 : 0
-      const lifetimeBudget = as.lifetime_budget ? parseFloat(as.lifetime_budget) / 100 : 0
+      const dailyBudget = as.daily_budget ? parseFloat(as.daily_budget) / offset : 0
+      const lifetimeBudget = as.lifetime_budget ? parseFloat(as.lifetime_budget) / offset : 0
 
       let insights: any = {}
       try {
@@ -914,8 +944,9 @@ async function handleGetAdsets(token: string, args: any) {
         id: as.id,
         name: as.name,
         status: as.status,
-        budget: dailyBudget || lifetimeBudget,
+        budget: +(dailyBudget || lifetimeBudget).toFixed(2),
         budget_type: dailyBudget ? 'daily' : 'lifetime',
+        budget_currency: currency,
         optimization_goal: as.optimization_goal,
         targeting_summary: summarizeTargeting(as.targeting),
         spend,
@@ -928,7 +959,7 @@ async function handleGetAdsets(token: string, args: any) {
     })
   )
 
-  return { adsets, total: adsets.length, date_preset }
+  return { adsets, total: adsets.length, date_preset, currency }
 }
 
 async function handleGetAds(token: string, args: any) {
