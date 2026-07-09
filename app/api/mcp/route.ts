@@ -56,17 +56,25 @@ async function metaFetch(token: string, path: string, params: Record<string, str
   return data
 }
 
-// ── Account currency cache (persists across warm invocations) ─────────
+// ── Account currency helpers ─────────────────────────────────────────
+// Currencies where Meta uses offset 1 (value = whole units, no cents).
+// All other currencies use offset 100 (value in cents).
+// Source: https://developers.facebook.com/docs/marketing-api/currencies
+const OFFSET_1_CURRENCIES = new Set([
+  'CLP', 'COP', 'CRC', 'HUF', 'ISK', 'IDR', 'JPY', 'KRW', 'PYG', 'TWD', 'VND',
+])
+
 const accountCurrencyCache = new Map<string, { currency: string; offset: number }>()
 
 async function getAccountCurrencyInfo(token: string, accountId: string): Promise<{ currency: string; offset: number }> {
   const cached = accountCurrencyCache.get(accountId)
   if (cached) return cached
 
-  const data = await metaFetch(token, accountId, { fields: 'currency,currency_offset' })
+  const data = await metaFetch(token, accountId, { fields: 'currency' })
+  const currency = data.currency || 'USD'
   const info = {
-    currency: data.currency || 'USD',
-    offset: parseInt(data.currency_offset) || 100,
+    currency,
+    offset: OFFSET_1_CURRENCIES.has(currency) ? 1 : 100,
   }
   accountCurrencyCache.set(accountId, info)
   return info
