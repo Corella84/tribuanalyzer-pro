@@ -1502,8 +1502,14 @@ async function getGA4Token(): Promise<{ accessToken: string; propertyId: string;
     query = query.order('updated_at', { ascending: false }).limit(1)
   }
 
-  const { data: conn } = await query.single()
-  if (!conn) throw new Error('GA4: no connection found. Connect Google Analytics from the dashboard first.')
+  const { data: conn, error: queryError } = await query.single()
+  if (queryError || !conn) {
+    const detail = queryError?.message || 'no rows returned'
+    throw new Error(
+      `GA4: no connection found (${detail}). ` +
+      `Go to https://tribuanalyzer-pro.vercel.app/dashboard and click "Connect Google Analytics" to authorize.`
+    )
+  }
 
   let accessToken = conn.access_token
   const expiresAt = new Date(conn.token_expires_at).getTime()
@@ -1525,7 +1531,13 @@ async function getGA4Token(): Promise<{ accessToken: string; propertyId: string;
       }),
     })
     const tokenData = await res.json()
-    if (!tokenData.access_token) throw new Error('GA4: failed to refresh token')
+    if (!tokenData.access_token) {
+      const errDesc = tokenData.error_description || tokenData.error || 'unknown'
+      throw new Error(
+        `GA4: failed to refresh token (${errDesc}). ` +
+        `Re-authorize at https://tribuanalyzer-pro.vercel.app/dashboard`
+      )
+    }
 
     accessToken = tokenData.access_token
     const newExpiry = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString()
