@@ -27,9 +27,21 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Wrap getUser in a timeout to prevent MIDDLEWARE_INVOCATION_TIMEOUT
+  let user = null
+  try {
+    const result = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Supabase auth timeout')), 8000)
+      ),
+    ])
+    user = result.data?.user ?? null
+  } catch {
+    // Supabase unreachable or timed out — let the request through
+    console.error('Middleware: Supabase auth check failed/timed out')
+    return supabaseResponse
+  }
 
   // Rutas protegidas - redirigir a login si no hay usuario
   if (
