@@ -35,7 +35,7 @@ function getTikTokConfig(): { accessToken: string; advertiserId: string } {
   return { accessToken, advertiserId }
 }
 
-async function tiktokFetch(accessToken: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
+async function tiktokFetchRaw(accessToken: string, endpoint: string, params: Record<string, any> = {}): Promise<{ code: number; message: string; data: any }> {
   const url = new URL(`${TIKTOK_API_BASE}/${endpoint}`)
 
   for (const [k, v] of Object.entries(params)) {
@@ -48,12 +48,58 @@ async function tiktokFetch(accessToken: string, endpoint: string, params: Record
     signal: AbortSignal.timeout(15000),
   })
 
-  const data = await res.json()
+  return res.json()
+}
+
+async function tiktokFetch(accessToken: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
+  const data = await tiktokFetchRaw(accessToken, endpoint, params)
   if (data.code !== 0) {
     throw new Error(`TikTok API: ${data.message} (code ${data.code})`)
   }
 
   return data.data
+}
+
+// ── Metric sets for report API ───────────────────────────────────────
+// Base metrics: proven to work on all accounts
+const CAMPAIGN_BASE_METRICS = ['campaign_name', 'spend', 'impressions', 'clicks', 'cpm', 'cpc', 'conversion', 'cost_per_conversion', 'conversion_rate']
+const AD_BASE_METRICS = ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion']
+
+// Optional value metrics: depend on pixel setup / account type, may be rejected
+const OPTIONAL_VALUE_METRICS = ['complete_payment_roas']
+
+// Fetch a TikTok report with automatic fallback if optional metrics are invalid
+async function tiktokReportFetch(
+  accessToken: string,
+  params: Record<string, any>,
+  baseMetrics: string[],
+  optionalMetrics: string[],
+): Promise<{ data: any; metrics_degraded: string[] | null }> {
+  // Try with all metrics
+  const allMetrics = [...baseMetrics, ...optionalMetrics]
+  const fullParams = { ...params, metrics: allMetrics }
+
+  const raw = await tiktokFetchRaw(accessToken, 'report/integrated/get/', fullParams)
+
+  if (raw.code === 0) {
+    return { data: raw.data, metrics_degraded: null }
+  }
+
+  // If error 40002 (invalid metrics), retry with base only
+  if (raw.code === 40002) {
+    const baseParams = { ...params, metrics: baseMetrics }
+    const retryRaw = await tiktokFetchRaw(accessToken, 'report/integrated/get/', baseParams)
+    if (retryRaw.code !== 0) {
+      throw new Error(`TikTok API: ${retryRaw.message} (code ${retryRaw.code})`)
+    }
+    return {
+      data: retryRaw.data,
+      metrics_degraded: optionalMetrics,
+    }
+  }
+
+  // Any other error: throw
+  throw new Error(`TikTok API: ${raw.message} (code ${raw.code})`)
 }
 
 async function tiktokPost(accessToken: string, endpoint: string, body: Record<string, any>): Promise<any> {
@@ -213,15 +259,19 @@ async function handleGetTikTokInsights(args: any) {
     ? { start_date: args.start_date, end_date: args.end_date }
     : getTikTokDateRange(args.date_preset || 'last_7d')
 
-  const data = await tiktokFetch(accessToken, 'report/integrated/get/', {
-    advertiser_id: advId,
-    report_type: 'BASIC',
-    data_level: 'AUCTION_CAMPAIGN',
-    dimensions: ['campaign_id'],
-    metrics: ['campaign_name', 'spend', 'impressions', 'clicks', 'cpm', 'cpc', 'conversion', 'cost_per_conversion', 'conversion_rate', 'complete_payment_roas', 'total_complete_payment', 'value_per_total_complete_payment', 'cost_per_total_complete_payment'],
-    start_date,
-    end_date,
-  })
+  const { data, metrics_degraded } = await tiktokReportFetch(
+    accessToken,
+    {
+      advertiser_id: advId,
+      report_type: 'BASIC',
+      data_level: 'AUCTION_CAMPAIGN',
+      dimensions: ['campaign_id'],
+      start_date,
+      end_date,
+    },
+    CAMPAIGN_BASE_METRICS,
+    OPTIONAL_VALUE_METRICS,
+  )
 
   const insights = (data.list || []).map((r: any) => {
     const dims = r.dimensions || {}
@@ -237,10 +287,7 @@ async function handleGetTikTokInsights(args: any) {
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
       conversion_rate: parseFloat(m.conversion_rate || '0'),
-      complete_payment_roas: parseFloat(m.complete_payment_roas || '0'),
-      total_complete_payments: parseInt(m.total_complete_payment || '0'),
-      value_per_complete_payment: parseFloat(m.value_per_total_complete_payment || '0'),
-      cost_per_complete_payment: parseFloat(m.cost_per_total_complete_payment || '0'),
+      ...(m.complete_payment_roas !== undefined ? { complete_payment_roas: parseFloat(m.complete_payment_roas || '0') } : {}),
     }
   })
 
@@ -248,7 +295,8 @@ async function handleGetTikTokInsights(args: any) {
     insights,
     total: insights.length,
     ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }),
-    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured). `total_complete_payments` specifically counts CompletePayment events.',
+    ...(metrics_degraded ? { metrics_degraded } : {}),
+    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured).',
   }
 }
 
@@ -275,12 +323,11 @@ async function handleGetTikTokAds(args: any) {
     }]
   }
 
-  const params: Record<string, any> = {
+  const reportParams: Record<string, any> = {
     advertiser_id: advId,
     report_type: 'BASIC',
     data_level: 'AUCTION_AD',
     dimensions: ['ad_id'],
-    metrics: ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion', 'complete_payment_roas', 'total_complete_payment', 'value_per_total_complete_payment', 'cost_per_total_complete_payment'],
     start_date,
     end_date,
     page,
@@ -288,10 +335,15 @@ async function handleGetTikTokAds(args: any) {
   }
 
   if (filtering) {
-    params.filtering = filtering
+    reportParams.filtering = filtering
   }
 
-  const data = await tiktokFetch(accessToken, 'report/integrated/get/', params)
+  const { data, metrics_degraded } = await tiktokReportFetch(
+    accessToken,
+    reportParams,
+    AD_BASE_METRICS,
+    OPTIONAL_VALUE_METRICS,
+  )
 
   const ads = (data.list || []).map((r: any) => {
     const dims = r.dimensions || {}
@@ -306,10 +358,7 @@ async function handleGetTikTokAds(args: any) {
       ctr: parseFloat(m.ctr || '0'),
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
-      complete_payment_roas: parseFloat(m.complete_payment_roas || '0'),
-      total_complete_payments: parseInt(m.total_complete_payment || '0'),
-      value_per_complete_payment: parseFloat(m.value_per_total_complete_payment || '0'),
-      cost_per_complete_payment: parseFloat(m.cost_per_total_complete_payment || '0'),
+      ...(m.complete_payment_roas !== undefined ? { complete_payment_roas: parseFloat(m.complete_payment_roas || '0') } : {}),
     }
   })
 
@@ -327,7 +376,8 @@ async function handleGetTikTokAds(args: any) {
     total_pages: totalPages,
     has_more: page < totalPages,
     ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }),
-    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured). `total_complete_payments` specifically counts CompletePayment events.',
+    ...(metrics_degraded ? { metrics_degraded } : {}),
+    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured).',
   }
 }
 
