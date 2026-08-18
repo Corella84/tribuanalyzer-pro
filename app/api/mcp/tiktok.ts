@@ -65,8 +65,9 @@ async function tiktokFetch(accessToken: string, endpoint: string, params: Record
 const CAMPAIGN_BASE_METRICS = ['campaign_name', 'spend', 'impressions', 'clicks', 'cpm', 'cpc', 'conversion', 'cost_per_conversion', 'conversion_rate']
 const AD_BASE_METRICS = ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion']
 
-// Optional value metrics: depend on pixel setup / account type, may be rejected
-const OPTIONAL_VALUE_METRICS = ['complete_payment_roas']
+// Optional value metrics: depend on pixel setup / account type, may be rejected.
+// If any are invalid, tiktokReportFetch retries with base-only and reports metrics_degraded.
+const OPTIONAL_VALUE_METRICS = ['complete_payment_roas', 'complete_payment', 'value_per_complete_payment', 'cost_per_complete_payment']
 
 // Fetch a TikTok report with automatic fallback if optional metrics are invalid
 async function tiktokReportFetch(
@@ -287,7 +288,11 @@ async function handleGetTikTokInsights(args: any) {
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
       conversion_rate: parseFloat(m.conversion_rate || '0'),
+      // Optional value metrics (included when not degraded)
       ...(m.complete_payment_roas !== undefined ? { complete_payment_roas: parseFloat(m.complete_payment_roas || '0') } : {}),
+      ...(m.complete_payment !== undefined ? { complete_payments: parseInt(m.complete_payment || '0') } : {}),
+      ...(m.value_per_complete_payment !== undefined ? { value_per_complete_payment: parseFloat(m.value_per_complete_payment || '0') } : {}),
+      ...(m.cost_per_complete_payment !== undefined ? { cost_per_complete_payment: parseFloat(m.cost_per_complete_payment || '0') } : {}),
     }
   })
 
@@ -358,7 +363,11 @@ async function handleGetTikTokAds(args: any) {
       ctr: parseFloat(m.ctr || '0'),
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
+      // Optional value metrics (included when not degraded)
       ...(m.complete_payment_roas !== undefined ? { complete_payment_roas: parseFloat(m.complete_payment_roas || '0') } : {}),
+      ...(m.complete_payment !== undefined ? { complete_payments: parseInt(m.complete_payment || '0') } : {}),
+      ...(m.value_per_complete_payment !== undefined ? { value_per_complete_payment: parseFloat(m.value_per_complete_payment || '0') } : {}),
+      ...(m.cost_per_complete_payment !== undefined ? { cost_per_complete_payment: parseFloat(m.cost_per_complete_payment || '0') } : {}),
     }
   })
 

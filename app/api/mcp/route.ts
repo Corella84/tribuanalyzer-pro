@@ -2030,7 +2030,7 @@ async function handleGetMer(args: any) {
         }
         const totals = (result.insights || []).reduce((acc: any, i: any) => ({
           spend: acc.spend + (i.spend || 0),
-          purchases: acc.purchases + (i.total_complete_payments || 0),
+          purchases: acc.purchases + (i.complete_payments || i.conversions || 0),
         }), { spend: 0, purchases: 0 })
         platformsOk.push('tiktok')
         return totals
