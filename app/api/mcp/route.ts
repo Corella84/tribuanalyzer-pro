@@ -379,7 +379,7 @@ const TOOLS = [
   },
   {
     name: 'get_insights',
-    description: 'Get performance insights for any object (campaign, adset, ad, or account). More flexible than get_campaign_insights.',
+    description: 'Get performance insights for any object (campaign, adset, ad, or account). More flexible than get_campaign_insights. Note: when level is specified, identifiers (ad_id, campaign_id, etc.) are included automatically. Ad status (ACTIVE/PAUSED) is not available in insights — use get_ad_details for that.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -736,11 +736,13 @@ const TOOLS = [
   },
   {
     name: 'get_orders',
-    description: 'Get orders from the Shopify store. Returns order name, date, total, financial status, line items, and source. Defaults to last 7 days.',
+    description: 'Get orders from the Shopify store. Returns order name, date, total, financial status, line items, source, referring_site, landing_site, and parsed UTM parameters. Supports date range or days lookback.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        days: { type: 'string', description: 'Number of days to look back (default 7)', default: '7' },
+        days: { type: 'string', description: 'Number of days to look back (default 7). Ignored if start_date/end_date are provided.', default: '7' },
+        start_date: { type: 'string', description: 'Start date (YYYY-MM-DD). Overrides days. Must be used with end_date.' },
+        end_date: { type: 'string', description: 'End date (YYYY-MM-DD). Overrides days. Must be used with start_date.' },
         status: { type: 'string', description: 'Order status: any, open, closed, cancelled (default any)', default: 'any' },
         limit: { type: 'string', description: 'Number of orders to return (max 250, default 50)', default: '50' },
       },
@@ -752,6 +754,20 @@ const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {},
+    },
+  },
+  // ── Cross-platform tools ──
+  {
+    name: 'get_mer',
+    description: 'Calculate Marketing Efficiency Ratio (MER). Aggregates spend from Meta/TikTok/Google, revenue from Shopify (paid orders only), and shows attribution discrepancy per platform.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        start_date: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+        end_date: { type: 'string', description: 'End date (YYYY-MM-DD)' },
+        meta_account_id: { type: 'string', description: 'Meta ad account ID (act_xxx). Uses env default if omitted.' },
+      },
+      required: ['start_date', 'end_date'],
     },
   },
   // ── Google Analytics 4 tools ──
@@ -1170,9 +1186,21 @@ async function handleGetInsights(token: string, args: any) {
   if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
 
   const useCustomRange = args.start_date && args.end_date
-  const params: Record<string, string> = {
-    fields: args.fields || 'spend,impressions,clicks,ctr,cpc,cpm,actions,action_values',
+
+  let fields = args.fields || 'spend,impressions,clicks,ctr,cpc,cpm,actions,action_values'
+
+  // When a level is specified, auto-include identifiers
+  if (args.level && !args.fields) {
+    const levelFields: Record<string, string> = {
+      ad: 'ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name',
+      adset: 'adset_id,adset_name,campaign_id,campaign_name',
+      campaign: 'campaign_id,campaign_name',
+    }
+    const extra = levelFields[args.level]
+    if (extra) fields = `${extra},${fields}`
   }
+
+  const params: Record<string, string> = { fields }
   if (useCustomRange) {
     params.time_range = JSON.stringify({ since: args.start_date, until: args.end_date })
   } else {
@@ -1478,6 +1506,13 @@ function getServiceSupabase() {
 }
 
 async function getGA4Token(): Promise<{ accessToken: string; propertyId: string; properties: any[] }> {
+  // Verify env vars before attempting database queries
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceKey) {
+    throw new Error('GA4: server misconfiguration — missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.')
+  }
+
   let userId: string | null = null
   let useServiceClient = false
 
@@ -1503,11 +1538,19 @@ async function getGA4Token(): Promise<{ accessToken: string; propertyId: string;
   }
 
   const { data: conn, error: queryError } = await query.single()
-  if (queryError || !conn) {
-    const detail = queryError?.message || 'no rows returned'
+  if (queryError) {
+    if (queryError.message?.includes('fetch') || queryError.message?.includes('network')) {
+      throw new Error(
+        `GA4: database unreachable (${queryError.message}). Check server environment variables and Supabase connectivity.`
+      )
+    }
     throw new Error(
-      `GA4: no connection found (${detail}). ` +
-      `Go to https://tribuanalyzer-pro.vercel.app/dashboard and click "Connect Google Analytics" to authorize.`
+      `GA4: database error (${queryError.message}). Go to https://tribuanalyzer-pro.vercel.app/dashboard and click "Connect Google Analytics" to authorize.`
+    )
+  }
+  if (!conn) {
+    throw new Error(
+      `GA4: no connection found. Go to https://tribuanalyzer-pro.vercel.app/dashboard and click "Connect Google Analytics" to authorize.`
     )
   }
 
@@ -1787,26 +1830,67 @@ async function handleGetProducts(args: any) {
   return { products, total: products.length, shop }
 }
 
+function parseLandingSiteUtm(landingSite: string | null): { source?: string; medium?: string; campaign?: string; term?: string; content?: string } | null {
+  if (!landingSite) return null
+  try {
+    const url = new URL(landingSite, 'https://placeholder.com')
+    const source = url.searchParams.get('utm_source')
+    if (!source) return null
+    return {
+      source,
+      medium: url.searchParams.get('utm_medium') || undefined,
+      campaign: url.searchParams.get('utm_campaign') || undefined,
+      term: url.searchParams.get('utm_term') || undefined,
+      content: url.searchParams.get('utm_content') || undefined,
+    }
+  } catch { return null }
+}
+
 async function handleGetOrders(args: any) {
   const { token, shop } = await getShopifyToken()
   const { days = '7', status = 'any', limit = '50' } = args
 
-  const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000).toISOString()
+  // Determine date range
+  let created_at_min: string
+  let created_at_max: string | undefined
+  let usedStartDate: string
+  let usedEndDate: string
 
-  const data = await shopifyFetch(token, shop, 'orders.json', {
+  if (args.start_date && args.end_date) {
+    const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+    if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+    created_at_min = `${args.start_date}T00:00:00Z`
+    created_at_max = `${args.end_date}T23:59:59Z`
+    usedStartDate = args.start_date
+    usedEndDate = args.end_date
+  } else {
+    const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000)
+    created_at_min = since.toISOString()
+    usedStartDate = since.toISOString().slice(0, 10)
+    usedEndDate = new Date().toISOString().slice(0, 10)
+  }
+
+  const fetchParams: Record<string, string> = {
     status,
-    created_at_min: since,
+    created_at_min,
     limit,
-    fields: 'id,name,created_at,total_price,subtotal_price,financial_status,line_items,source_name',
-  })
+    fields: 'id,name,created_at,total_price,current_total_price,subtotal_price,financial_status,line_items,source_name,referring_site,landing_site',
+  }
+  if (created_at_max) fetchParams.created_at_max = created_at_max
+
+  const data = await shopifyFetch(token, shop, 'orders.json', fetchParams)
 
   const orders = (data.orders || []).map((o: any) => ({
     id: o.name,
     date: o.created_at?.slice(0, 10),
     total: parseFloat(o.total_price || '0'),
+    current_total: parseFloat(o.current_total_price || o.total_price || '0'),
     subtotal: parseFloat(o.subtotal_price || '0'),
     status: o.financial_status,
     source: o.source_name,
+    referring_site: o.referring_site || null,
+    landing_site: o.landing_site || null,
+    utm: parseLandingSiteUtm(o.landing_site),
     items: (o.line_items || []).map((li: any) => ({
       title: li.title,
       quantity: li.quantity,
@@ -1814,18 +1898,44 @@ async function handleGetOrders(args: any) {
     })),
   }))
 
-  const paidOrders = orders.filter((o: any) => ['paid', 'partially_paid'].includes(o.status))
-  const totalRevenue = paidOrders.reduce((sum: number, o: any) => sum + o.total, 0)
+  const paidStatuses = ['paid', 'partially_paid', 'partially_refunded']
+  const paidOrders = orders.filter((o: any) => paidStatuses.includes(o.status))
+  // Use current_total (current_total_price) which is net of refunds and order edits
+  const totalRevenue = paidOrders.reduce((sum: number, o: any) => sum + o.current_total, 0)
+
+  // UTM coverage breakdown
+  const utmCoverage = orders.reduce((acc: any, o: any) => {
+    const src = o.source || 'unknown'
+    if (!acc[src]) acc[src] = { with_utm: 0, without_utm: 0 }
+    if (o.utm) { acc[src].with_utm++ } else { acc[src].without_utm++ }
+    return acc
+  }, {} as Record<string, { with_utm: number; without_utm: number }>)
+  const totalWithUtm = orders.filter((o: any) => o.utm).length
+  const totalWithoutUtm = orders.length - totalWithUtm
 
   return {
     orders,
     total: orders.length,
+    has_more: orders.length >= parseInt(limit),
     summary: {
       total_orders: orders.length,
       paid_orders: paidOrders.length,
       total_revenue: +totalRevenue.toFixed(2),
       avg_order_value: paidOrders.length > 0 ? +(totalRevenue / paidOrders.length).toFixed(2) : 0,
-      period_days: days,
+      start_date: usedStartDate,
+      end_date: usedEndDate,
+      limit: parseInt(limit),
+      revenue_criteria: 'Revenue uses current_total_price (net of refunds and order edits). Includes orders with financial_status: paid, partially_paid, partially_refunded. Excludes: pending, voided, refunded, authorized.',
+      orders_by_status: orders.reduce((acc: Record<string, number>, o: any) => {
+        acc[o.status] = (acc[o.status] || 0) + 1
+        return acc
+      }, {}),
+      utm_coverage: {
+        total_with_utm: totalWithUtm,
+        total_without_utm: totalWithoutUtm,
+        by_source: utmCoverage,
+        note: 'Draft orders (shopify_draft_order) typically have no web session and will not have UTM parameters. This is a Shopify limitation, not a data gap.',
+      },
     },
     shop,
   }
@@ -1847,6 +1957,195 @@ async function handleGetCollections() {
   }))
 
   return { collections, total: collections.length, shop }
+}
+
+// ── Cross-platform: MER handler ───────────────────────────────────────
+async function handleGetMer(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
+  const { start_date, end_date } = args
+
+  // Resolve Meta token
+  let metaToken: string | null = null
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data: connection } = await supabase
+        .from('meta_connections')
+        .select('access_token')
+        .eq('user_id', user.id)
+        .single()
+      if (connection?.access_token) metaToken = connection.access_token.trim()
+    }
+  } catch { /* no browser session */ }
+  if (!metaToken) metaToken = process.env.META_ACCESS_TOKEN?.trim() || null
+
+  // Resolve Meta account ID
+  const metaAccountId = args.meta_account_id || process.env.META_AD_ACCOUNT_ID?.trim() || null
+
+  // Track platform status
+  const platformsOk: string[] = []
+  const platformsFailed: { platform: string; reason: string }[] = []
+
+  // Parallel calls: Meta, TikTok, Shopify, Google
+  const [metaResult, tiktokResult, shopifyResult, googleResult] = await Promise.all([
+    // Meta
+    (async () => {
+      try {
+        if (!metaToken || !metaAccountId) {
+          platformsFailed.push({ platform: 'meta', reason: 'Not configured (no token or account ID)' })
+          return { spend: 0, purchases: 0 }
+        }
+        const result: any = await handleGetInsights(metaToken, {
+          object_id: metaAccountId,
+          fields: 'spend,actions,action_values',
+          start_date,
+          end_date,
+        })
+        if (result.error) {
+          platformsFailed.push({ platform: 'meta', reason: result.error })
+          return { spend: 0, purchases: 0 }
+        }
+        const row = result.insights?.[0] || {}
+        platformsOk.push('meta')
+        return {
+          spend: parseFloat(row.spend || '0'),
+          purchases: extractPurchases(row.actions),
+          revenue: extractRevenue(row.action_values),
+        }
+      } catch (e: any) {
+        platformsFailed.push({ platform: 'meta', reason: e.message })
+        return { spend: 0, purchases: 0 }
+      }
+    })(),
+    // TikTok
+    (async () => {
+      try {
+        const result = await TIKTOK_HANDLERS.get_tiktok_insights({ start_date, end_date })
+        if (result.error) {
+          platformsFailed.push({ platform: 'tiktok', reason: result.error })
+          return { spend: 0, purchases: 0 }
+        }
+        const totals = (result.insights || []).reduce((acc: any, i: any) => ({
+          spend: acc.spend + (i.spend || 0),
+          purchases: acc.purchases + (i.total_complete_payments || 0),
+        }), { spend: 0, purchases: 0 })
+        platformsOk.push('tiktok')
+        return totals
+      } catch (e: any) {
+        platformsFailed.push({ platform: 'tiktok', reason: e.message })
+        return { spend: 0, purchases: 0 }
+      }
+    })(),
+    // Shopify (all orders including draft orders for total revenue)
+    (async () => {
+      try {
+        const result = await handleGetOrders({ start_date, end_date, limit: '250', status: 'any' })
+        if (result.error) {
+          platformsFailed.push({ platform: 'shopify', reason: result.error })
+          return { revenue: 0, orders: 0, web_revenue: 0, draft_revenue: 0 }
+        }
+        // Separate web vs draft order revenue
+        const paidStatuses = ['paid', 'partially_paid', 'partially_refunded']
+        const allOrders = result.orders || []
+        const paidOrders = allOrders.filter((o: any) => paidStatuses.includes(o.status))
+        const webOrders = paidOrders.filter((o: any) => o.source !== 'shopify_draft_order')
+        const draftOrders = paidOrders.filter((o: any) => o.source === 'shopify_draft_order')
+        const webRevenue = webOrders.reduce((s: number, o: any) => s + o.current_total, 0)
+        const draftRevenue = draftOrders.reduce((s: number, o: any) => s + o.current_total, 0)
+        platformsOk.push('shopify')
+        return {
+          revenue: result.summary?.total_revenue || 0,
+          orders: result.summary?.paid_orders || 0,
+          web_revenue: +webRevenue.toFixed(2),
+          draft_revenue: +draftRevenue.toFixed(2),
+          web_orders: webOrders.length,
+          draft_orders: draftOrders.length,
+        }
+      } catch (e: any) {
+        platformsFailed.push({ platform: 'shopify', reason: e.message })
+        return { revenue: 0, orders: 0, web_revenue: 0, draft_revenue: 0 }
+      }
+    })(),
+    // Google Ads
+    (async () => {
+      try {
+        if (!GOOGLE_ADS_HANDLERS.get_google_insights) {
+          platformsFailed.push({ platform: 'google', reason: 'Google Ads handler not available' })
+          return { spend: 0, conversions: 0, conversions_value: 0 }
+        }
+        const result = await GOOGLE_ADS_HANDLERS.get_google_insights({ start_date, end_date })
+        if (result.error) {
+          platformsFailed.push({ platform: 'google', reason: result.error })
+          return { spend: 0, conversions: 0, conversions_value: 0 }
+        }
+        const campaigns = result.campaigns || []
+        const totals = campaigns.reduce((acc: any, c: any) => ({
+          spend: acc.spend + (c.cost || 0),
+          conversions: acc.conversions + (c.conversions || 0),
+          conversions_value: acc.conversions_value + (c.conversions_value || 0),
+        }), { spend: 0, conversions: 0, conversions_value: 0 })
+        platformsOk.push('google')
+        return totals
+      } catch (e: any) {
+        platformsFailed.push({ platform: 'google', reason: e.message })
+        return { spend: 0, conversions: 0, conversions_value: 0 }
+      }
+    })(),
+  ])
+
+  const metaSpend = metaResult.spend || 0
+  const tiktokSpend = tiktokResult.spend || 0
+  const googleSpend = googleResult.spend || 0
+  const totalSpend = metaSpend + tiktokSpend + googleSpend
+  const shopifyRevenue = shopifyResult.revenue || 0
+
+  // Determine completeness: spend platforms that failed matter
+  const spendPlatformsFailed = platformsFailed.filter(p => ['meta', 'tiktok', 'google'].includes(p.platform))
+  const isComplete = spendPlatformsFailed.length === 0 && !platformsFailed.find(p => p.platform === 'shopify')
+  const merValue = totalSpend > 0 ? +(shopifyRevenue / totalSpend).toFixed(2) : 0
+
+  const metaPurchases = metaResult.purchases || 0
+  const tiktokPurchases = tiktokResult.purchases || 0
+  const googleConversions = googleResult.conversions || 0
+  const totalPlatformClaimed = metaPurchases + tiktokPurchases + googleConversions
+  const shopifyOrders = shopifyResult.orders || 0
+
+  return {
+    period: { start_date, end_date },
+    is_complete: isComplete,
+    platforms_ok: platformsOk,
+    platforms_failed: platformsFailed,
+    spend: {
+      meta: +metaSpend.toFixed(2),
+      tiktok: +tiktokSpend.toFixed(2),
+      google: +googleSpend.toFixed(2),
+      total: +totalSpend.toFixed(2),
+    },
+    revenue: {
+      shopify_total: +shopifyRevenue.toFixed(2),
+      shopify_web: +(shopifyResult.web_revenue || 0).toFixed(2),
+      shopify_draft: +(shopifyResult.draft_revenue || 0).toFixed(2),
+      revenue_criteria: 'Revenue uses current_total_price (net of refunds/edits). Includes web + draft orders (WhatsApp/showroom). Statuses: paid, partially_paid, partially_refunded.',
+    },
+    mer: isComplete
+      ? merValue
+      : { value: merValue, warning: 'PARTIAL — missing spend from: ' + spendPlatformsFailed.map(p => p.platform).join(', '), missing: spendPlatformsFailed.map(p => p.platform) },
+    attribution: {
+      meta_purchases: metaPurchases,
+      meta_revenue: +(metaResult.revenue || 0).toFixed(2),
+      tiktok_purchases: tiktokPurchases,
+      google_conversions: googleConversions,
+      google_conversions_value: +(googleResult.conversions_value || 0).toFixed(2),
+      total_platform_claimed: totalPlatformClaimed,
+      shopify_actual_orders: shopifyOrders,
+      shopify_web_orders: shopifyResult.web_orders || 0,
+      shopify_draft_orders: shopifyResult.draft_orders || 0,
+      discrepancy: totalPlatformClaimed - shopifyOrders,
+    },
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -2006,6 +2305,7 @@ async function handleMcpMessage(msg: any) {
         get_products: handleGetProducts,
         get_orders: handleGetOrders,
         get_collections: () => handleGetCollections(),
+        get_mer: handleGetMer,
       }
 
       const GA4_HANDLERS: Record<string, (a: any) => Promise<any>> = {

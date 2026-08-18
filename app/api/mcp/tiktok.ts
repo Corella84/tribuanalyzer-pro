@@ -135,7 +135,7 @@ export const TIKTOK_TOOLS = [
   },
   {
     name: 'get_tiktok_insights',
-    description: 'Get campaign-level performance insights from TikTok Ads. Returns spend, impressions, clicks, CPM, CPC, conversions, cost per conversion, and conversion rate.',
+    description: 'Get campaign-level performance insights from TikTok Ads. Returns spend, impressions, clicks, CPM, CPC, conversions, cost per conversion, conversion rate, ROAS, and conversion value (complete payment).',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -148,13 +148,15 @@ export const TIKTOK_TOOLS = [
   },
   {
     name: 'get_tiktok_ads',
-    description: 'Get ad-level performance insights from TikTok Ads. Returns ad name, campaign name, spend, impressions, clicks, CTR, conversions, and cost per conversion. Supports filtering by campaign_id and pagination.',
+    description: 'Get ad-level performance insights from TikTok Ads. Returns ad name, campaign name, spend, impressions, clicks, CTR, conversions, cost per conversion, ROAS, and conversion value. Supports filtering by campaign_id, custom date ranges, and pagination.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         advertiser_id: { type: 'string', description: 'TikTok advertiser ID. If omitted, uses env var.' },
         campaign_id: { type: 'string', description: 'Filter ads by campaign ID. If omitted, returns ads from all campaigns.' },
-        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_14d, last_30d, this_month, last_month', default: 'last_7d' },
+        date_preset: { type: 'string', description: 'Date range: today, yesterday, last_7d, last_14d, last_30d, this_month, last_month. Ignored if start_date/end_date are provided.', default: 'last_7d' },
+        start_date: { type: 'string', description: 'Custom start date (YYYY-MM-DD). Must be used together with end_date. Overrides date_preset.' },
+        end_date: { type: 'string', description: 'Custom end date (YYYY-MM-DD). Must be used together with start_date. Overrides date_preset.' },
         page: { type: 'number', description: 'Page number for pagination. Default: 1', default: 1 },
         page_size: { type: 'number', description: 'Results per page (max 1000). Default: 50', default: 50 },
       },
@@ -216,7 +218,7 @@ async function handleGetTikTokInsights(args: any) {
     report_type: 'BASIC',
     data_level: 'AUCTION_CAMPAIGN',
     dimensions: ['campaign_id'],
-    metrics: ['campaign_name', 'spend', 'impressions', 'clicks', 'cpm', 'cpc', 'conversion', 'cost_per_conversion', 'conversion_rate'],
+    metrics: ['campaign_name', 'spend', 'impressions', 'clicks', 'cpm', 'cpc', 'conversion', 'cost_per_conversion', 'conversion_rate', 'complete_payment_roas', 'total_complete_payment', 'value_per_total_complete_payment', 'cost_per_total_complete_payment'],
     start_date,
     end_date,
   })
@@ -235,23 +237,42 @@ async function handleGetTikTokInsights(args: any) {
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
       conversion_rate: parseFloat(m.conversion_rate || '0'),
+      complete_payment_roas: parseFloat(m.complete_payment_roas || '0'),
+      total_complete_payments: parseInt(m.total_complete_payment || '0'),
+      value_per_complete_payment: parseFloat(m.value_per_total_complete_payment || '0'),
+      cost_per_complete_payment: parseFloat(m.cost_per_total_complete_payment || '0'),
     }
   })
 
-  return { insights, total: insights.length, ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }) }
+  return {
+    insights,
+    total: insights.length,
+    ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }),
+    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured). `total_complete_payments` specifically counts CompletePayment events.',
+  }
 }
 
 async function handleGetTikTokAds(args: any) {
+  const dateCheck = validateCustomDateRange(args.start_date, args.end_date)
+  if (!dateCheck.valid) return { error: (dateCheck as { valid: false; error: string }).error }
+
   const { accessToken, advertiserId } = getTikTokConfig()
   const advId = args.advertiser_id || advertiserId
-  const { start_date, end_date } = getTikTokDateRange(args.date_preset || 'last_7d')
+  const useCustomRange = args.start_date && args.end_date
+  const { start_date, end_date } = useCustomRange
+    ? { start_date: args.start_date, end_date: args.end_date }
+    : getTikTokDateRange(args.date_preset || 'last_7d')
   const page = args.page || 1
   const pageSize = args.page_size || 50
 
-  // Build filtering object if campaign_id is provided
-  const filtering: Record<string, any> = {}
+  // Build filtering array in TikTok's expected format
+  let filtering: Array<{field_name: string; filter_type: string; filter_value: string}> | undefined
   if (args.campaign_id) {
-    filtering.campaign_ids = [args.campaign_id]
+    filtering = [{
+      field_name: 'campaign_ids',
+      filter_type: 'IN',
+      filter_value: JSON.stringify([args.campaign_id]),
+    }]
   }
 
   const params: Record<string, any> = {
@@ -259,15 +280,14 @@ async function handleGetTikTokAds(args: any) {
     report_type: 'BASIC',
     data_level: 'AUCTION_AD',
     dimensions: ['ad_id'],
-    metrics: ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion'],
+    metrics: ['ad_name', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'conversion', 'cost_per_conversion', 'complete_payment_roas', 'total_complete_payment', 'value_per_total_complete_payment', 'cost_per_total_complete_payment'],
     start_date,
     end_date,
     page,
     page_size: pageSize,
   }
 
-  // Only add filtering if we have filters
-  if (Object.keys(filtering).length > 0) {
+  if (filtering) {
     params.filtering = filtering
   }
 
@@ -286,6 +306,10 @@ async function handleGetTikTokAds(args: any) {
       ctr: parseFloat(m.ctr || '0'),
       conversions: parseInt(m.conversion || '0'),
       cost_per_conversion: parseFloat(m.cost_per_conversion || '0'),
+      complete_payment_roas: parseFloat(m.complete_payment_roas || '0'),
+      total_complete_payments: parseInt(m.total_complete_payment || '0'),
+      value_per_complete_payment: parseFloat(m.value_per_total_complete_payment || '0'),
+      cost_per_complete_payment: parseFloat(m.cost_per_total_complete_payment || '0'),
     }
   })
 
@@ -302,7 +326,8 @@ async function handleGetTikTokAds(args: any) {
     page_size: pageSize,
     total_pages: totalPages,
     has_more: page < totalPages,
-    date_preset: args.date_preset || 'last_7d',
+    ...(useCustomRange ? { start_date, end_date } : { date_preset: args.date_preset || 'last_7d' }),
+    note: '`conversions` counts the conversion event configured in the pixel (e.g. CompletePayment if configured). `total_complete_payments` specifically counts CompletePayment events.',
   }
 }
 
