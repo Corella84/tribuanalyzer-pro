@@ -1830,19 +1830,53 @@ async function handleGetProducts(args: any) {
   return { products, total: products.length, shop }
 }
 
-function parseLandingSiteUtm(landingSite: string | null): { source?: string; medium?: string; campaign?: string; term?: string; content?: string } | null {
+function parseLandingSiteUtm(landingSite: string | null, referringSite: string | null): {
+  source?: string; medium?: string; campaign?: string; term?: string; content?: string; id?: string;
+  click_id?: { type: string; value: string } | null;
+  inferred_channel?: string;
+} | null {
   if (!landingSite) return null
   try {
-    const url = new URL(landingSite, 'https://placeholder.com')
-    const source = url.searchParams.get('utm_source')
-    if (!source) return null
-    return {
-      source,
-      medium: url.searchParams.get('utm_medium') || undefined,
-      campaign: url.searchParams.get('utm_campaign') || undefined,
-      term: url.searchParams.get('utm_term') || undefined,
-      content: url.searchParams.get('utm_content') || undefined,
+    const url = new URL(landingSite, 'https://x')
+    const p = url.searchParams
+
+    // Collect all utm_* params present
+    const source = p.get('utm_source') || undefined
+    const medium = p.get('utm_medium') || undefined
+    const campaign = p.get('utm_campaign') || undefined
+    const term = p.get('utm_term') || undefined
+    const content = p.get('utm_content') || undefined
+    const id = p.get('utm_id') || undefined
+
+    // Detect click IDs
+    const fbclid = p.get('fbclid')
+    const gclid = p.get('gclid')
+    const srsltid = p.get('srsltid')
+    const ttclid = p.get('ttclid')
+    const click_id = fbclid ? { type: 'fbclid', value: fbclid }
+      : gclid ? { type: 'gclid', value: gclid }
+      : srsltid ? { type: 'srsltid', value: srsltid }
+      : ttclid ? { type: 'ttclid', value: ttclid }
+      : null
+
+    // Infer channel from click ID or referring_site
+    const refLower = (referringSite || '').toLowerCase()
+    let inferred_channel = 'direct'
+    if (fbclid || refLower.includes('facebook.com') || refLower.includes('instagram.com') || refLower.includes('fb.com') || refLower.includes('l.facebook.com')) {
+      inferred_channel = 'meta (inferred)'
+    } else if (gclid || srsltid || refLower.includes('google.com') || refLower.includes('google.co')) {
+      inferred_channel = 'google (inferred)'
+    } else if (ttclid || refLower.includes('tiktok.com')) {
+      inferred_channel = 'tiktok (inferred)'
+    } else if (refLower) {
+      inferred_channel = 'organic/referral (inferred)'
     }
+
+    // Return null only if NO utm param AND no click ID
+    const hasAnyUtm = source || medium || campaign || term || content || id
+    if (!hasAnyUtm && !click_id) return null
+
+    return { source, medium, campaign, term, content, id, click_id, inferred_channel }
   } catch { return null }
 }
 
@@ -1890,7 +1924,7 @@ async function handleGetOrders(args: any) {
     source: o.source_name,
     referring_site: o.referring_site || null,
     landing_site: o.landing_site || null,
-    utm: parseLandingSiteUtm(o.landing_site),
+    utm: parseLandingSiteUtm(o.landing_site, o.referring_site),
     items: (o.line_items || []).map((li: any) => ({
       title: li.title,
       quantity: li.quantity,
